@@ -46,7 +46,11 @@ DEFAULT_ENV = {
     "DATA_DIR": "/data",
     "HOST": "0.0.0.0",
     "PORT": "8439",
-    "CORS_ALLOW_ORIGINS": "*",
+    # Concrete origins only: the Capacitor app is https://localhost, the web UI
+    # is same-origin, and the backend already allows loopback/LAN patterns.
+    # A wildcard is unnecessary now that the service is on a public domain, and
+    # it would let any website call the API from a visitor's browser.
+    "CORS_ALLOW_ORIGINS": "https://localhost,http://localhost,capacitor://localhost",
     "LOG_LEVEL": "info",
 }
 

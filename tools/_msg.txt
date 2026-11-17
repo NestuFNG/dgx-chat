@@ -1,0 +1,5 @@
+ci: use Node 22
+
+pnpm 11 refuses to start on Node 20 ("requires at least Node.js v22.13"), which
+took down both the frontend job and the APK build. Node 22 matches what the
+lockfiles were generated with.

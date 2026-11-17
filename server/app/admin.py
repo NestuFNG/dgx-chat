@@ -986,11 +986,11 @@ async function loadUsers() {
         <td>${u.fileCount}</td>
         <td>${fmtDate(u.createdAt)}</td>
         <td class="actions">
-          <button class="ghost" onclick="resetPassword('${u.id}','${esc(u.username)}')">重置密码</button>
-          <button class="ghost" onclick="specifyPassword('${u.id}','${esc(u.username)}')">指定密码</button>
-          <button class="ghost" onclick="setDisabled('${u.id}','${esc(u.username)}', ${u.disabled ? 0 : 1})">${u.disabled ? '启用' : '禁用'}</button>
-          <button class="ghost" onclick="revokeTokens('${u.id}','${esc(u.username)}')">吊销登录</button>
-          <button class="danger" onclick="deleteUser('${u.id}','${esc(u.username)}')">删除</button>
+          <button class="ghost" data-action="reset-password" data-id="${esc(u.id)}" data-name="${esc(u.username)}">重置密码</button>
+          <button class="ghost" data-action="specify-password" data-id="${esc(u.id)}" data-name="${esc(u.username)}">指定密码</button>
+          <button class="ghost" data-action="toggle-disabled" data-id="${esc(u.id)}" data-name="${esc(u.username)}" data-disabled="${u.disabled ? '0' : '1'}">${u.disabled ? '启用' : '禁用'}</button>
+          <button class="ghost" data-action="revoke-tokens" data-id="${esc(u.id)}" data-name="${esc(u.username)}">吊销登录</button>
+          <button class="danger" data-action="delete-user" data-id="${esc(u.id)}" data-name="${esc(u.username)}">删除</button>
         </td>
       </tr>`).join('');
   } catch (err) {
@@ -1117,8 +1117,8 @@ async function loadInvites() {
         <td>${inv.expiresAt ? fmtDate(inv.expiresAt) : '永久'}</td>
         <td>${esc(state)}</td>
         <td class="actions">
-          <button class="ghost" onclick="copyInvite('${esc(inv.code)}')">复制</button>
-          <button class="danger" onclick="revokeInvite('${esc(inv.code)}')">吊销</button>
+          <button class="ghost" data-action="copy-invite" data-code="${esc(inv.code)}">复制</button>
+          <button class="danger" data-action="revoke-invite" data-code="${esc(inv.code)}">吊销</button>
         </td>
       </tr>`;
     }).join('');
@@ -1228,6 +1228,27 @@ async function changeMyPassword() {
     setMsg('chgMsg', '修改失败：' + err.message, false);
   }
 }
+
+// One delegated listener for every row-level action.  Data travels through
+// data-* attributes (HTML-escaped) and is never compiled into JavaScript
+// source, so a username such as  x','alert(1)','y  cannot break out.
+document.addEventListener('click', (event) => {
+  const button = event.target.closest('button[data-action]');
+  if (!button) return;
+  const id = button.dataset.id || '';
+  const name = button.dataset.name || '';
+  const code = button.dataset.code || '';
+  switch (button.dataset.action) {
+    case 'reset-password': resetPassword(id, name); break;
+    case 'specify-password': specifyPassword(id, name); break;
+    case 'toggle-disabled': setDisabled(id, name, button.dataset.disabled === '1'); break;
+    case 'revoke-tokens': revokeTokens(id, name); break;
+    case 'delete-user': deleteUser(id, name); break;
+    case 'copy-invite': copyInvite(code); break;
+    case 'revoke-invite': revokeInvite(code); break;
+    default: break;
+  }
+});
 
 if (state.token) {
   api('/auth/me').then(user => {

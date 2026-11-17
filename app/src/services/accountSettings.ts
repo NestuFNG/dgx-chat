@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { getStoredToken, handleUnauthorized } from './auth.js'
 import { bearer, fetchApiJson } from './api/http.js'
 import { isUnauthorized } from './sync/cloud.js'
+import { createScopeGuard, isScopeCurrent } from './sync/scope.js'
 
 /**
  * 每个账号存在服务器上的非凭证设置 + 语音 / 搜索凭证块（SPEC 后端契约）。
@@ -81,23 +82,31 @@ export const loadAccountSettings = (): Promise<AccountSettings | null> => {
     return inflight
   }
   useAccountSettings.setState({ loading: true, error: null })
+  const guard = createScopeGuard()
   const request = fetchApiJson<AccountSettings>('/api/me/settings', { headers: bearer(token) })
     .then((data) => {
+      if (!isScopeCurrent(guard)) {
+        return data
+      }
       useAccountSettings.setState({ data, loading: false, error: null })
       return data
     })
     .catch((error: unknown) => {
-      if (isUnauthorized(error)) {
-        handleUnauthorized()
+      if (isScopeCurrent(guard)) {
+        if (isUnauthorized(error)) {
+          handleUnauthorized()
+        }
+        useAccountSettings.setState({
+          loading: false,
+          error: error instanceof Error ? error.message : String(error),
+        })
       }
-      useAccountSettings.setState({
-        loading: false,
-        error: error instanceof Error ? error.message : String(error),
-      })
       throw error
     })
     .finally(() => {
-      inflight = null
+      if (inflight === request) {
+        inflight = null
+      }
     })
   inflight = request
   return request
@@ -114,12 +123,16 @@ export const saveAccountSettings = async (
   if (!token) {
     throw new Error('Not signed in')
   }
+  const guard = createScopeGuard()
   const data = await fetchApiJson<AccountSettings>('/api/me/settings', {
     method: 'PUT',
     headers: { ...bearer(token), 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
   })
-  useAccountSettings.setState({ data, loading: false, error: null })
+  // 保存期间切换了账号：不要把 A 的响应写进 B 的缓存
+  if (isScopeCurrent(guard)) {
+    useAccountSettings.setState({ data, loading: false, error: null })
+  }
   return data
 }
 

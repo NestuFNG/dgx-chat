@@ -6,7 +6,7 @@ import { resetAccountSettings } from '../services/accountSettings.js'
 import { refreshCapabilities, resetCapabilities } from '../services/capabilities.js'
 import { resetUpdateCache } from '../services/update.js'
 import { flushSyncQueue, resetSyncQueue } from '../services/sync/queue.js'
-import { syncAfterLogin } from '../services/sync/pull.js'
+import { clearRemoteCache, syncAfterLogin } from '../services/sync/pull.js'
 import { useIsMobile, useMobileViewport, usePreventPageScroll } from './viewport.js'
 import {
   bindChatPersistence,
@@ -119,6 +119,7 @@ export const App = () => {
     resetAccountSettings()
     resetCapabilities()
     resetUpdateCache()
+    clearRemoteCache()
     void (async () => {
       await resetChatForAccount()
       await syncAccount()

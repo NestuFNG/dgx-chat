@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 
 from .auth import authenticate
 from .db import Database, now_ms
-from .files import FileStore, sanitize_local_id
+from .files import FileStore, file_response_headers, sanitize_local_id
 from .models import ApiError, not_found
 from . import credentials
 from .security import check_storage_quota, reject_oversized_content_length
@@ -235,14 +235,10 @@ async def get_client_file(local_id: str, request: Request) -> Response:
     if found is None:
         raise not_found(f"附件不存在：{local_id}")
     data, meta = found
-    return Response(
-        content=data,
-        media_type=meta["mime_type"] or "application/octet-stream",
-        headers={
-            "Content-Disposition": f'inline; filename="{meta["id"]}"',
-            "x-dgx-sha256": meta["sha256"],
-        },
-    )
+    mime = meta["mime_type"] or "application/octet-stream"
+    headers = file_response_headers(mime, meta["id"])
+    headers["x-dgx-sha256"] = meta["sha256"]
+    return Response(content=data, media_type=mime, headers=headers)
 
 
 @router.put("/api/files/{local_id}")

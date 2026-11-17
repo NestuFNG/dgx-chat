@@ -50,6 +50,23 @@ export const cloudLogout = (token: string): Promise<void> =>
 export const cloudListSessions = (token: string): Promise<SessionSummary[]> =>
   fetchApiJson<SessionSummary[]>('/api/sessions', { headers: bearer(token) })
 
+/** GET /api/sessions/sync?since=：增量会话列表 + 删除墓碑 + 下次游标 */
+export type SessionSyncResponse = {
+  sessions: SessionSummary[]
+  deleted: string[]
+  serverTime?: number | string
+  since?: number | string
+}
+
+export const cloudSyncSessions = (
+  token: string,
+  since: string | null
+): Promise<SessionSyncResponse> =>
+  fetchApiJson<SessionSyncResponse>(
+    `/api/sessions/sync${since ? `?since=${encodeURIComponent(since)}` : ''}`,
+    { headers: bearer(token) }
+  )
+
 export const cloudGetSession = (token: string, id: string): Promise<Session> =>
   fetchApiJson<Session>(`/api/sessions/${encodeURIComponent(id)}`, { headers: bearer(token) })
 

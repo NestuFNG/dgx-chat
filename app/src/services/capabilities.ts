@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { getStoredToken, handleUnauthorized } from './auth.js'
 import { bearer, fetchApiJson } from './api/http.js'
 import { isUnauthorized } from './sync/cloud.js'
+import { createScopeGuard, isScopeCurrent } from './sync/scope.js'
 
 /**
  * 服务器推导出的「当前账号能用什么」：是否有官方 Key、语音当前走账号/服务器、搜索是否可用。
@@ -41,12 +42,19 @@ export const refreshCapabilities = (): Promise<Capabilities | null> => {
     return inflight
   }
   useCapabilities.setState({ loading: true, error: null })
+  const guard = createScopeGuard()
   const request = fetchApiJson<Capabilities>('/api/me/capabilities', { headers: bearer(token) })
     .then((data) => {
+      if (!isScopeCurrent(guard)) {
+        return null
+      }
       useCapabilities.setState({ data, loading: false, error: null })
       return data
     })
     .catch((error: unknown) => {
+      if (!isScopeCurrent(guard)) {
+        return null
+      }
       if (isUnauthorized(error)) {
         handleUnauthorized()
       }
@@ -57,7 +65,9 @@ export const refreshCapabilities = (): Promise<Capabilities | null> => {
       return null
     })
     .finally(() => {
-      inflight = null
+      if (inflight === request) {
+        inflight = null
+      }
     })
   inflight = request
   return request

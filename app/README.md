@@ -69,8 +69,12 @@ account; the mock's invite code is `DGX-INVITE-2026`. The script is not part of 
 
 ## Known limitations (v1)
 
-- **No remote-deletion propagation.** A session deleted on another device stays in this browser
-  until it is deleted here; a pull never removes local sessions.
+- **Remote deletions are propagated from tombstones, with caveats.** Incremental pulls call
+  `GET /api/sessions/sync?since=` and delete locally the ids listed in `deleted`; the cursor is
+  persisted per account. Remaining limits: the first pull (no cursor yet, e.g. right after
+  upgrading or on a new device) is a full pull and does not consume historical tombstones, so
+  previously deleted sessions can linger locally (they are no longer re-uploaded); if the backend
+  has no sync endpoint the client falls back to the plain list and no tombstones are applied.
 - **Last-write-wins with client clocks.** The server keeps the copy with the newer `updatedAt`;
   device clock skew can therefore make an older edit look newer. The pull path never stamps a
   newer remote timestamp onto a stale local body.

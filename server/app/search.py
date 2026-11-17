@@ -429,11 +429,18 @@ class SearchService:
             ):
                 provider = user_provider.strip().lower()
             base = override.get("base_url")
-            if isinstance(base, str) and base.strip():
-                config.provider_base_url = base.strip()
             key = override.get("api_key")
-            if isinstance(key, str) and key.strip():
-                config.provider_api_key = key.strip()
+            user_base = base.strip() if isinstance(base, str) and base.strip() else ""
+            user_key = key.strip() if isinstance(key, str) and key.strip() else ""
+            if user_base:
+                config.provider_base_url = user_base
+                # SECURITY: never forward the server's search credential to a
+                # host chosen by a normal user.  A custom endpoint must bring its
+                # own key; otherwise no Authorization is sent at all.
+                if not user_key:
+                    config.provider_api_key = ""
+            if user_key:
+                config.provider_api_key = user_key
             limit = override.get("max_results")
             if isinstance(limit, int) and 1 <= limit <= 20:
                 config.max_results = limit

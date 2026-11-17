@@ -55,11 +55,108 @@ def safe_extension(name: str) -> str:
     return suffix
 
 
+#: Conservative allow-list for client-declared MIME types.  Anything else is
+#: stored as application/octet-stream — we never echo an attacker-chosen type.
+ALLOWED_MIME_TYPES = frozenset(
+    {
+        "application/pdf",
+        "application/json",
+        "application/xml",
+        "application/xhtml+xml",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
+        "application/zip",
+        "application/octet-stream",
+        "text/plain",
+        "text/markdown",
+        "text/csv",
+        "text/html",
+        "text/xml",
+        "text/css",
+        "text/javascript",
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "image/bmp",
+        "image/tiff",
+        "image/svg+xml",
+        "audio/wav",
+        "audio/x-wav",
+        "audio/mpeg",
+        "audio/mp3",
+        "audio/ogg",
+        "audio/opus",
+        "audio/webm",
+        "audio/flac",
+        "audio/aac",
+        "audio/pcm",
+        "video/mp4",
+        "video/webm",
+        "video/ogg",
+        "video/quicktime",
+    }
+)
+
+#: Types that a browser may execute as script when rendered inline.
+SCRIPTABLE_MIME_TYPES = frozenset(
+    {
+        "text/html",
+        "application/xhtml+xml",
+        "image/svg+xml",
+        "text/xml",
+        "application/xml",
+        "text/javascript",
+        "application/javascript",
+        "application/x-javascript",
+        "text/ecmascript",
+        "application/ecmascript",
+    }
+)
+
+
+def is_scriptable_mime(mime_type: str | None) -> bool:
+    mime = (mime_type or "").lower().split(";")[0].strip()
+    return (
+        mime in SCRIPTABLE_MIME_TYPES
+        or mime.endswith("+xml")
+        or "html" in mime
+    )
+
+
+def sanitize_mime(filename: str, declared: str | None) -> str:
+    """Pick a MIME type from the allow-list; never trust the client blindly."""
+    candidate = (declared or "").split(";")[0].strip().lower()
+    guessed, _ = mimetypes.guess_type(filename or "")
+    for value in (candidate, (guessed or "").lower()):
+        if value and value in ALLOWED_MIME_TYPES:
+            return value
+    return "application/octet-stream"
+
+
 def guess_mime(filename: str, declared: str | None) -> str:
-    if declared and declared != "application/octet-stream":
-        return declared.split(";")[0].strip()
-    guessed, _ = mimetypes.guess_type(filename)
-    return guessed or (declared or "application/octet-stream")
+    """Backwards-compatible alias for :func:`sanitize_mime`."""
+    return sanitize_mime(filename, declared)
+
+
+def file_response_headers(mime_type: str, filename: str) -> dict[str, str]:
+    """Defence in depth for user-supplied files.
+
+    Script-capable types are always a download (never rendered inline) and are
+    additionally sandboxed; every file response forbids MIME sniffing.
+    """
+    scriptable = is_scriptable_mime(mime_type)
+    headers = {
+        "Content-Disposition": content_disposition(
+            filename, mime_type, force_attachment=scriptable
+        ),
+        "X-Content-Type-Options": "nosniff",
+    }
+    if scriptable:
+        headers["Content-Security-Policy"] = "sandbox"
+    return headers
 
 
 @dataclass(slots=True)
@@ -255,7 +352,7 @@ class FileStore:
         os.replace(temp_path, path)
         digest = hashlib.sha256(data).hexdigest()
         stamp = now_ms()
-        mime = (content_type or "application/octet-stream").split(";")[0].strip()
+        mime = sanitize_mime(name, content_type)
         await self.db.execute(
             "INSERT INTO client_files (user_id, local_id, mime_type, size_bytes, sha256,"
             " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
@@ -326,13 +423,22 @@ def sanitize_local_id(local_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def content_disposition(filename: str) -> str:
-    """RFC 6266 header that survives non-ASCII names (headers are latin-1)."""
+def content_disposition(
+    filename: str, mime_type: str = "", *, force_attachment: bool = False
+) -> str:
+    """RFC 6266 header that survives non-ASCII names (headers are latin-1).
+
+    Script-capable MIME types are forced to ``attachment`` so an uploaded HTML or
+    SVG file can never execute on the application origin.
+    """
     from urllib.parse import quote
 
+    disposition = "attachment" if force_attachment else "inline"
     ascii_name = filename.encode("ascii", "ignore").decode("ascii").strip() or "file"
     ascii_name = ascii_name.replace('"', "_")
-    return f"inline; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}"
+    return (
+        f"{disposition}; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}"
+    )
 
 
 @router.post("/anthropic/v1/files", response_model=FileObject)
@@ -374,7 +480,7 @@ async def get_file_content(file_id: str, request: Request):
     return Response(
         content=data,
         media_type=record.mime_type,
-        headers={"Content-Disposition": content_disposition(record.filename)},
+        headers=file_response_headers(record.mime_type, record.filename),
     )
 
 

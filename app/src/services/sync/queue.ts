@@ -8,6 +8,7 @@ import {
   isUnauthorized,
 } from './cloud.js'
 import { markFilePushed, markSessionPushed, unmarkSessionPushed } from './markers.js'
+import { createScopeGuard, isScopeCurrent } from './scope.js'
 
 /**
  * 云同步写穿队列：saveSession / renameSession / deleteSession 与附件上传都走这里。
@@ -24,7 +25,12 @@ type Job<T> = {
   attempts: number
   timer: ReturnType<typeof setTimeout> | null
   running: boolean
+  /** 每次入队 / 更新内容递增；请求完成时用它判断是否又有更新内容 */
+  revision: number
 }
+
+/** 全局单调递增的队列版本号（会话与附件共用即可） */
+let revisionSequence = 0
 
 const sessionJobs = new Map<string, Job<Session>>()
 const fileJobs = new Map<string, Job<Blob>>()
@@ -68,8 +74,15 @@ const enqueueJob = <T>(
   const job = jobs.get(id)
   if (job) {
     job.value = value
+    job.revision = ++revisionSequence
   } else {
-    jobs.set(id, { value, attempts: 0, timer: null, running: false })
+    jobs.set(id, {
+      value,
+      attempts: 0,
+      timer: null,
+      running: false,
+      revision: ++revisionSequence,
+    })
   }
   scheduleJob(jobs, id, flush)
 }
@@ -116,14 +129,21 @@ const flushSession = async (id: string): Promise<void> => {
     sessionJobs.delete(id)
     return
   }
+  // 请求开始时固定账号与版本：响应回来若账号已切换或内容已更新，都不能按旧结果收尾
+  const guard = createScopeGuard()
+  const sentRevision = job.revision
   job.running = true
   const value = job.value
   const request = cloudPutSession(token, value)
   inFlightPuts.set(id, request)
   try {
     await request
+    if (!isScopeCurrent(guard)) {
+      return
+    }
     markSessionPushed(id)
-    if (sessionJobs.get(id) === job) {
+    // 只有版本仍是发出时的版本才清除；期间入队的新版本留在队列里继续发送
+    if (sessionJobs.get(id) === job && job.revision === sentRevision) {
       sessionJobs.delete(id)
     }
   } catch (error) {
@@ -144,16 +164,22 @@ const flushSession = async (id: string): Promise<void> => {
       inFlightPuts.delete(id)
     }
     job.running = false
+    if (!isScopeCurrent(guard)) {
+      sessionJobs.delete(id)
+      return
+    }
     // 删除已排队：不重试、不再排新的 PUT
     if (deletingSessions.has(id)) {
       sessionJobs.delete(id)
       return
     }
-    if (sessionJobs.get(id) === job && job.attempts > 0) {
-      scheduleJob(sessionJobs, id, flushSession)
-    } else if (sessionJobs.get(id) === job && job.value !== value) {
-      // 运行期间内容又变了：按最新内容再排一次
-      scheduleJob(sessionJobs, id, flushSession)
+    if (sessionJobs.get(id) === job) {
+      if (job.attempts > 0) {
+        scheduleJob(sessionJobs, id, flushSession)
+      } else if (job.revision !== sentRevision) {
+        // 运行期间内容又变了：按最新内容再排一次
+        scheduleJob(sessionJobs, id, flushSession)
+      }
     }
   }
 }
@@ -191,6 +217,7 @@ const flushDelete = async (id: string): Promise<void> => {
     return
   }
   job.running = true
+  const guard = createScopeGuard()
   // 先等同一会话的在途 PUT 落地（成功或失败），再删除，避免旧 PUT 后到把会话复活
   const pendingPut = inFlightPuts.get(id)
   if (pendingPut) {
@@ -202,6 +229,9 @@ const flushDelete = async (id: string): Promise<void> => {
   }
   try {
     await cloudDeleteSession(token, id)
+    if (!isScopeCurrent(guard)) {
+      return
+    }
     deleteJobs.delete(id)
     unmarkSessionPushed(id)
   } catch (error) {
@@ -246,11 +276,16 @@ const flushFile = async (id: string): Promise<void> => {
     return
   }
   job.running = true
+  const guard = createScopeGuard()
+  const sentRevision = job.revision
   const blob = job.value
   try {
     await cloudPutFile(token, id, blob)
+    if (!isScopeCurrent(guard)) {
+      return
+    }
     markFilePushed(id)
-    if (fileJobs.get(id) === job) {
+    if (fileJobs.get(id) === job && job.revision === sentRevision) {
       fileJobs.delete(id)
     }
   } catch (error) {
@@ -268,10 +303,16 @@ const flushFile = async (id: string): Promise<void> => {
     logFailure('file', id, job.attempts, error)
   } finally {
     job.running = false
-    if (fileJobs.get(id) === job && job.attempts > 0) {
-      scheduleJob(fileJobs, id, flushFile)
-    } else if (fileJobs.get(id) === job && job.value !== blob) {
-      scheduleJob(fileJobs, id, flushFile)
+    if (!isScopeCurrent(guard)) {
+      fileJobs.delete(id)
+      return
+    }
+    if (fileJobs.get(id) === job) {
+      if (job.attempts > 0) {
+        scheduleJob(fileJobs, id, flushFile)
+      } else if (job.revision !== sentRevision) {
+        scheduleJob(fileJobs, id, flushFile)
+      }
     }
   }
 }

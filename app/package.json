@@ -10,6 +10,7 @@
     "build": "node scripts/build.mjs",
     "build:win": "node scripts/build.mjs",
     "type": "tsc -p tsconfig.json",
+    "test": "node scripts/run-tests.mjs",
     "mock": "node scripts/mock-backend.mjs",
     "lint": "oxlint src rspack.config.ts",
     "format": "oxfmt --write ."

@@ -258,18 +258,45 @@ async def _user_from_token(db: Database, token: str) -> AuthUser | None:
     return user
 
 
-async def _user_from_credentials(db: Database, credential: str) -> AuthUser | None:
-    """``username:password`` in the Authorization header (convenience for hand entry)."""
+async def _user_from_credentials(
+    request: Request, credential: str, db: Database, settings: Settings
+) -> AuthUser | None:
+    """``username:password`` in the Authorization header (convenience for hand entry).
+
+    This path shares the login limiter with ``POST /auth/login``: the same per-IP
+    and per-(IP+username) failure counters, the same 429 + Retry-After, and the
+    same reset-on-success.  Otherwise it would be a brute-force bypass.
+    """
     if ":" not in credential:
         return None
     username, _, password = credential.partition(":")
+    username = username.strip()
     if not username or not password:
         return None
+    limiters = getattr(request.app.state, "limiters", None)
+    ip = client_ip(request, settings)
+    user_key = f"{ip}|{username.lower()}"
+    if limiters is not None:
+        for limiter, key in ((limiters.login_by_ip, ip), (limiters.login_by_ip_user, user_key)):
+            allowed, retry_after = limiter.check(key)
+            if not allowed:
+                raise retry_after_error(
+                    "登录失败次数过多，请稍后再试", int(retry_after) + 1
+                )
+
     row = await find_user_by_username(db, username)
-    if row is None or int(row["disabled"] or 0):
+    valid = (
+        row is not None
+        and not int(row["disabled"] or 0)
+        and verify_password(password, str(row["password_hash"]))
+    )
+    if not valid:
+        if limiters is not None:
+            limiters.login_by_ip.hit(ip)
+            limiters.login_by_ip_user.hit(user_key)
         return None
-    if not verify_password(password, str(row["password_hash"])):
-        return None
+    if limiters is not None:
+        limiters.login_by_ip_user.reset(user_key)
     return _row_to_user(row)
 
 
@@ -277,12 +304,17 @@ async def authenticate(request: Request) -> AuthUser:
     """Resolve the caller or raise a 401 :class:`ApiError`."""
     state = request.app.state
     db: Database = state.db
+    settings: Settings = state.settings
     credential = _extract_credential(request)
     if not credential:
         raise authentication_error("缺少凭证：请使用 Authorization: Bearer <token> 或 x-api-key")
     user = await _user_from_token(db, credential)
-    if user is None:
-        user = await _user_from_credentials(db, credential)
+    if user is None and ":" in credential:
+        if not getattr(settings, "allow_credentials_auth", True):
+            raise authentication_error(
+                "用户名密码直连已关闭，请先调用 /auth/login 获取 token"
+            )
+        user = await _user_from_credentials(request, credential, db, settings)
     if user is None:
         raise authentication_error("凭证无效或已被吊销")
     return user

@@ -199,7 +199,11 @@ class Database:
     # -- lifecycle ---------------------------------------------------------
     async def connect(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        conn = await aiosqlite.connect(str(self.path))
+        # isolation_level=None = SQLite autocommit mode.  Transactions are then
+        # only opened explicitly via Database.transaction(); this prevents
+        # sqlite3's implicit BEGIN from colliding with it (and with concurrent
+        # requests sharing this connection).
+        conn = await aiosqlite.connect(str(self.path), isolation_level=None)
         conn.row_factory = aiosqlite.Row
         await conn.execute("PRAGMA journal_mode=WAL")
         await conn.execute("PRAGMA synchronous=NORMAL")

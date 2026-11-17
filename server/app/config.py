@@ -283,6 +283,10 @@ class Settings:
     registration_mode: str = "invite"  # invite | closed | open
     allow_open_registration: bool = False  # legacy alias for mode=open
     invite_code: str = ""  # legacy shared code; admin-issued codes are preferred
+    #: allow ``Authorization: Bearer username:password`` on any endpoint (SPEC §2.1).
+    #: Password attempts always share the login rate limiter; operators can turn the
+    #: whole convenience path off with ALLOW_CREDENTIALS_AUTH=0.
+    allow_credentials_auth: bool = True
     password_min_length: int = 6
     docs_enabled: bool = False
     max_upload_bytes: int = 100 * 1024 * 1024
@@ -547,6 +551,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
         ping_interval=_env_float("DGX_PING_INTERVAL", 10.0),
         allow_open_registration=resolve_registration_mode() == "open",
         invite_code=_env("DGXCHAT_INVITE_CODE", "").strip(),
+        allow_credentials_auth=_env_bool("ALLOW_CREDENTIALS_AUTH", True),
         password_min_length=_env_int("DGXCHAT_PASSWORD_MIN_LENGTH", 6),
         docs_enabled=_env_bool("DGXCHAT_DOCS", False),
         max_upload_bytes=_env_int("DGXCHAT_MAX_UPLOAD_BYTES", 100 * 1024 * 1024),

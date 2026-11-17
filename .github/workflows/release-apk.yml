@@ -45,8 +45,10 @@ jobs:
 
       - name: Install Android platform and build tools
         run: |
-          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          # Licences must be accepted before installing, otherwise sdkmanager
+          # waits for input on a fresh runner and the step fails.
           yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4

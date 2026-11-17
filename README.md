@@ -16,13 +16,14 @@ It is a fork of the front end from
 extended with runtime-configurable server address, accounts, cloud session sync
 and a Capacitor Android shell.
 
-> **Screenshot:** the web UI is a single centred chat column on a dark,
-> near-black background: a collapsible left sidebar listing conversations grouped
-> by date, a composer at the bottom with attach / microphone / send controls, and
-> message bubbles that render Markdown, syntax-highlighted code, KaTeX math and
-> Mermaid diagrams inline. A settings dialog (gear icon) exposes the server
-> address, account, voice and model options. To publish a screenshot, save it as
-> `docs/screenshot.png` and add `![DGX Chat UI](docs/screenshot.png)` here.
+![DGX Chat running in a browser](docs/screenshot.png)
+
+The web UI is a single centred chat column on a dark, near-black background: a
+collapsible left sidebar listing conversations grouped by date, a composer at
+the bottom with attach / microphone / send controls, and message bubbles that
+render Markdown, syntax-highlighted code, KaTeX math and Mermaid diagrams
+inline. A settings dialog (gear icon) exposes the server address, account,
+voice and model options.
 
 ---
 

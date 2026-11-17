@@ -42,6 +42,9 @@ const describeTranscribeError = (error: unknown): TranslationMessage => {
       return { key: 'speechOfficialKeyRejected' }
     }
   }
+  if (error instanceof ApiError && error.kind === 'network') {
+    return { key: 'connectionFailed', params: { message: error.message } }
+  }
   return { key: 'voiceInputFailed' }
 }
 

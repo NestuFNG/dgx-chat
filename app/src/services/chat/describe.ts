@@ -33,12 +33,15 @@ export const describeReply = (reply: AssistantMessage): Notice | null => {
       return { text: message || translate('uploadFileStatusFailed') }
     }
     if (kind === 'network') {
-      // 未配置服务器地址是要用户处理的问题，不能折叠成通用网络错误
+      // 未配置服务器地址是要用户处理的问题，不能折叠成通用网络错误；
+      // 其余网络错误带上具体地址（由 client.ts 拼进 message），便于用户定位。
+      if (localMessage?.key === 'serverAddressRequired') {
+        return { text: message }
+      }
       return {
-        text:
-          localMessage?.key === 'serverAddressRequired'
-            ? message
-            : translate('commonNetworkErrorToast'),
+        text: reply.error.message
+          ? translate('connectionFailed', { message: reply.error.message })
+          : translate('commonNetworkErrorToast'),
       }
     }
     switch (classifyStatus(status)) {

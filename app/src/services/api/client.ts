@@ -1,5 +1,5 @@
 import { translate, type TranslationMessage } from '../../i18n/index.js'
-import { getApiOrigin } from './origin.js'
+import { formatNetworkError, getApiOrigin } from './origin.js'
 import { readMessageEvent } from './parseEvent.js'
 import { readServerSentEvents } from './sse.js'
 import type {
@@ -82,6 +82,15 @@ const readErrorResponse = async (
   return new ApiError(kind, message, response.status)
 }
 
+/** 从请求 URL 里取出 origin，用于网络错误提示具体地址 */
+const originOf = (url: string): string => {
+  try {
+    return new URL(url).origin
+  } catch {
+    return ''
+  }
+}
+
 export const request = async (url: string, init: RequestInit): Promise<Response> => {
   let response: Response
   try {
@@ -90,7 +99,13 @@ export const request = async (url: string, init: RequestInit): Promise<Response>
     if (init.signal?.aborted) {
       throw error
     }
-    throw new ApiError('network', error instanceof Error ? error.message : String(error))
+    throw new ApiError(
+      'network',
+      formatNetworkError(
+        error instanceof Error ? error.message : String(error),
+        originOf(url)
+      )
+    )
   }
   if (!response.ok) {
     throw await readErrorResponse(response)

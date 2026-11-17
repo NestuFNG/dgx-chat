@@ -274,6 +274,8 @@ export const en = {
   updateAvailable: 'Update available: {version}',
   downloadUpdate: 'Download update',
   updateDownloadHint: 'If the download does not open, copy the address below:',
+  connectionFailed: 'Connection failed: {message}',
+  originAutoSwitched: 'Automatically switched to {origin}',
   settingsLocaleZhCN: 'Simplified Chinese',
   settingsLocaleEnUS: 'English',
 } satisfies Record<keyof typeof zh, string>

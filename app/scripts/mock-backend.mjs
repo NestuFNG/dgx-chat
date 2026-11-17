@@ -267,9 +267,26 @@ const server = createServer(async (req, res) => {
   const path = url.pathname
   const method = req.method ?? 'GET'
 
+  // 模拟「443 入口 308 到带端口地址」的部署：MOCK_REDIRECT_TO=http://127.0.0.1:8790
+  const redirectTo = process.env.MOCK_REDIRECT_TO
+  if (redirectTo) {
+    const location = `${redirectTo.replace(/\/+$/, '')}${path}${url.search}`
+    console.log(`[mock] ${method} ${path} -> 308 ${location}`)
+    res.writeHead(308, { ...cors, Location: location })
+    res.end()
+    return
+  }
+
   if (method === 'OPTIONS') {
     res.writeHead(204, cors)
     res.end()
+    return
+  }
+
+  // 地址自动解析用的健康检查（简单 GET，可被 308 重定向）
+  if (method === 'GET' && path === '/health') {
+    console.log(`[mock] GET ${path} -> 200`)
+    json(res, 200, { status: 'ok' })
     return
   }
 

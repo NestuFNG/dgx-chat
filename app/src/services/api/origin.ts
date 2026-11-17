@@ -135,3 +135,68 @@ export const setApiOrigin = (value: string | null): string => {
 
 /** 地址是否与默认值不同（设置面板用来提示「已自定义」） */
 export const isCustomOrigin = (): boolean => getApiOrigin() !== defaultOrigin()
+
+/** 探测 /health 的超时（毫秒）；失败只回退到输入地址，不阻塞用户 */
+const PROBE_TIMEOUT_MS = 6_000
+
+export type OriginResolution = { origin: string; redirected: boolean } | { error: string }
+
+/** 每个不同输入在一次会话里只探测一次（成功或失败都缓存） */
+const probeCache = new Map<string, { origin: string; redirected: boolean }>()
+
+/**
+ * 自动解析服务器地址：用简单 GET 探测 /health（无自定义头，不触发 CORS 预检），
+ * 允许跟随 308/301 等重定向，并把最终 origin 作为结果。
+ *
+ * 安全约束：只有当最终地址的 hostname 与输入完全一致时才接受端口变化；
+ * 跨主机重定向一律忽略。探测失败（断网、超时、非 2xx）也返回输入地址，交给现有错误处理。
+ */
+export const resolveApiOrigin = async (raw: string): Promise<OriginResolution> => {
+  const normalized = normalizeOrigin(raw)
+  if (!normalized) {
+    return { error: 'invalid' }
+  }
+  const cached = probeCache.get(normalized)
+  if (cached) {
+    return cached
+  }
+
+  let result = { origin: normalized, redirected: false }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS)
+  try {
+    const response = await fetch(`${normalized}/health`, {
+      mode: 'cors',
+      redirect: 'follow',
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+    if (response.ok) {
+      try {
+        const finalUrl = new URL(response.url)
+        const finalOrigin = finalUrl.origin
+        if (
+          finalOrigin !== normalized &&
+          finalUrl.hostname === new URL(normalized).hostname
+        ) {
+          const resolved = normalizeOrigin(finalOrigin)
+          if (resolved) {
+            result = { origin: resolved, redirected: resolved !== normalized }
+          }
+        }
+      } catch {
+        // 解析最终地址失败时保留输入地址
+      }
+    }
+  } catch {
+    // 探测失败不影响用户：保留输入地址，后续请求会给出带地址的错误
+  } finally {
+    clearTimeout(timer)
+  }
+  probeCache.set(normalized, result)
+  return result
+}
+
+/** 把失败地址拼进网络错误文案，例如 failed to fetch（http://host:8443） */
+export const formatNetworkError = (message: string, origin: string): string =>
+  origin ? `${message}（${origin}）` : message

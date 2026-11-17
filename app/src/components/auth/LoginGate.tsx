@@ -5,6 +5,7 @@ import {
   getApiOrigin,
   isSameOriginDefault,
   normalizeOrigin,
+  resolveApiOrigin,
   setApiOrigin,
 } from '../../services/api/origin.js'
 import {
@@ -31,14 +32,16 @@ export const LoginGate = () => {
   // Web 部署时默认使用当前页面地址；原生壳内没有这个回退
   const [sameOriginDefault] = useState(() => isSameOriginDefault())
   const [originError, setOriginError] = useState<string | null>(null)
+  // 探测到重定向后的提示，例如「已自动切换到 https://host:9443」
+  const [originNotice, setOriginNotice] = useState<string | null>(null)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [inviteCode, setInviteCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  /** 校验并保存服务器地址；返回是否有效。分发包没有默认地址时必须显式填写 */
-  const saveOrigin = (): boolean => {
+  /** 校验输入；空值 / 非法 URL 时设置内联错误。分发包没有默认地址时必须显式填写 */
+  const validateOrigin = (): boolean => {
     if (!origin.trim()) {
       setOriginError(t('serverAddressMissing'))
       return false
@@ -48,6 +51,14 @@ export const LoginGate = () => {
       return false
     }
     setOriginError(null)
+    return true
+  }
+
+  /** 直连模式：校验并保存输入地址，不做 /health 探测 */
+  const saveEnteredOrigin = (): boolean => {
+    if (!validateOrigin()) {
+      return false
+    }
     setOrigin(setApiOrigin(origin))
     return true
   }
@@ -55,11 +66,11 @@ export const LoginGate = () => {
   const describe = (cause: unknown, kind: 'login' | 'register'): string => {
     if (isNetworkError(cause)) {
       const message = cause instanceof Error ? cause.message : String(cause)
-      // 未配置服务器地址时直接展示原因，而不是笼统的「无法连接服务器」
+      // 未配置服务器地址时直接展示原因，而不是笼统的连接失败
       if (message === t('serverAddressRequired')) {
         return message
       }
-      return t('serverNetworkError', { message })
+      return t('connectionFailed', { message })
     }
     if (cause instanceof HttpError) {
       if (cause.status === 429) {
@@ -79,12 +90,22 @@ export const LoginGate = () => {
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (busy || !saveOrigin()) {
+    if (busy || !validateOrigin()) {
       return
     }
     setBusy(true)
     setError(null)
     try {
+      // 先用简单 GET 探测 /health：443 入口 308 到 :9443 这类情况会在这里自动纠正，
+      // 避免带预检的 API 请求被不可重定向的 CORS preflight 卡死。
+      const resolution = await resolveApiOrigin(origin)
+      if ('error' in resolution) {
+        setOriginError(t('serverAddressInvalid'))
+        return
+      }
+      const saved = setApiOrigin(resolution.origin)
+      setOrigin(saved)
+      setOriginNotice(resolution.redirected ? t('originAutoSwitched', { origin: saved }) : null)
       if (mode === 'register') {
         await register(username, password, inviteCode)
       } else {
@@ -123,13 +144,14 @@ export const LoginGate = () => {
               onChange={(event) => {
                 setOrigin(event.target.value)
                 setOriginError(null)
+                setOriginNotice(null)
               }}
               onBlur={() => {
                 // 空值只在提交 / 直连时提示必填，避免用户还没输入就看到报错
                 if (!origin.trim() || origin === getApiOrigin()) {
                   return
                 }
-                saveOrigin()
+                saveEnteredOrigin()
               }}
             />
             {originError ? (
@@ -138,9 +160,11 @@ export const LoginGate = () => {
               </span>
             ) : (
               <span className={styles.fieldHint}>
-                {sameOriginDefault && origin === getApiOrigin()
-                  ? t('serverAddressSameOriginHint')
-                  : t('serverAddressDescription')}
+                {originNotice
+                  ? originNotice
+                  : sameOriginDefault && origin === getApiOrigin()
+                    ? t('serverAddressSameOriginHint')
+                    : t('serverAddressDescription')}
               </span>
             )}
           </label>
@@ -236,7 +260,7 @@ export const LoginGate = () => {
             type="button"
             disabled={busy}
             onClick={() => {
-              if (!saveOrigin()) {
+              if (!saveEnteredOrigin()) {
                 return
               }
               setSkipLogin(true)

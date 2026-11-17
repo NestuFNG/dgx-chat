@@ -90,6 +90,11 @@ export const describeReadAloudError = (error: unknown): TranslationMessage | str
       return { key: 'insufficientBalance' }
     case 'rateLimited':
       return { key: 'rateLimited' }
+    case 'network':
+      return {
+        key: 'connectionFailed',
+        params: { message: error instanceof Error ? error.message : '' },
+      }
     default:
       return { key: 'ttsFailed' }
   }

@@ -6,6 +6,7 @@ import {
   getApiOrigin,
   isSameOriginDefault,
   normalizeOrigin,
+  resolveApiOrigin,
   setApiOrigin,
 } from '../../services/api/origin.js'
 import {
@@ -40,6 +41,9 @@ export const ServerSettings = () => {
   const [origin, setOrigin] = useState(() => getApiOrigin())
   const [originError, setOriginError] = useState<string | null>(null)
   const [originSaved, setOriginSaved] = useState(false)
+  // 自动解析（/health 跟随重定向）后的提示，例如「已自动切换到 https://host:9443」
+  const [originNotice, setOriginNotice] = useState<string | null>(null)
+  const [originBusy, setOriginBusy] = useState(false)
   // Web 部署时默认使用当前页面地址；原生壳内没有这个回退
   const [sameOriginDefault, setSameOriginDefault] = useState(() => isSameOriginDefault())
 
@@ -62,7 +66,14 @@ export const ServerSettings = () => {
     }
   }, [token])
 
-  const saveOrigin = () => {
+  /**
+   * 保存服务器地址：先校验，再用 /health 探测一次（简单 GET，不触发预检）。
+   * 同主机换端口（如 443 -> 9443）时采用最终地址并回填；跨主机重定向忽略。
+   */
+  const saveOrigin = async () => {
+    if (originBusy) {
+      return
+    }
     if (!origin.trim()) {
       setOriginError(t('serverAddressMissing'))
       return
@@ -71,14 +82,44 @@ export const ServerSettings = () => {
       setOriginError(t('serverAddressInvalid'))
       return
     }
-    const saved = setApiOrigin(origin)
-    setOrigin(saved)
-    setOriginError(null)
-    setOriginSaved(true)
-    setSameOriginDefault(isSameOriginDefault())
-    if (useAuth.getState().token) {
-      void checkConnection()
+    setOriginBusy(true)
+    try {
+      const resolution = await resolveApiOrigin(origin)
+      if ('error' in resolution) {
+        setOriginError(t('serverAddressInvalid'))
+        return
+      }
+      const saved = setApiOrigin(resolution.origin)
+      setOrigin(saved)
+      setOriginError(null)
+      setOriginSaved(true)
+      setOriginNotice(resolution.redirected ? t('originAutoSwitched', { origin: saved }) : null)
+      setSameOriginDefault(isSameOriginDefault())
+      if (useAuth.getState().token) {
+        void checkConnection()
+      }
+    } finally {
+      setOriginBusy(false)
     }
+  }
+
+  /** 「重新检查」：同样先解析地址（可能被 308 到带端口的地址），再查 /auth/me */
+  const recheckConnection = async () => {
+    if (!originBusy) {
+      setOriginBusy(true)
+      try {
+        const resolution = await resolveApiOrigin(origin)
+        if (!('error' in resolution)) {
+          const saved = setApiOrigin(resolution.origin)
+          setOrigin(saved)
+          setOriginNotice(resolution.redirected ? t('originAutoSwitched', { origin: saved }) : null)
+          setSameOriginDefault(isSameOriginDefault())
+        }
+      } finally {
+        setOriginBusy(false)
+      }
+    }
+    await checkConnection()
   }
 
   /** 恢复默认值：构建期地址 → 浏览器同源 → 空（原生壳内为空），绝不伪造地址 */
@@ -86,6 +127,7 @@ export const ServerSettings = () => {
     const restored = setApiOrigin(null)
     setOrigin(restored)
     setOriginError(null)
+    setOriginNotice(null)
     setOriginSaved(false)
     setSameOriginDefault(isSameOriginDefault())
     if (restored && useAuth.getState().token) {
@@ -129,7 +171,7 @@ export const ServerSettings = () => {
       if (message === t('serverAddressRequired')) {
         return message
       }
-      return t('serverNetworkError', { message })
+      return t('connectionFailed', { message })
     }
     if (cause instanceof HttpError) {
       if (cause.status === 429) {
@@ -197,18 +239,25 @@ export const ServerSettings = () => {
             autoComplete="url"
             value={origin}
             placeholder={t('serverAddressPlaceholder')}
+            disabled={originBusy}
             onChange={(event) => {
               setOrigin(event.target.value)
               setOriginSaved(false)
+              setOriginNotice(null)
             }}
-            onBlur={saveOrigin}
+            onBlur={() => void saveOrigin()}
             onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
               if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
-                saveOrigin()
+                void saveOrigin()
               }
             }}
           />
-          <button type="button" className={styles.link} onClick={resetOrigin}>
+          <button
+            type="button"
+            className={styles.link}
+            disabled={originBusy}
+            onClick={resetOrigin}
+          >
             {t('serverAddressReset')}
           </button>
           {originError ? (
@@ -221,6 +270,11 @@ export const ServerSettings = () => {
             </div>
           ) : null}
         </div>
+        {originNotice ? (
+          <div className={settingsStyles.description} role="status">
+            {originNotice}
+          </div>
+        ) : null}
       </div>
 
       <div className={clsx(settingsStyles.cell, styles.block)}>
@@ -294,7 +348,12 @@ export const ServerSettings = () => {
         <div className={styles.actions}>
           {token ? (
             <>
-              <Button variant="outlined" size="m" onClick={() => void checkConnection()}>
+              <Button
+                variant="outlined"
+                size="m"
+                disabled={originBusy}
+                onClick={() => void recheckConnection()}
+              >
                 {t('serverRecheck')}
               </Button>
               <Button variant="dangerOutlined" size="m" onClick={logout}>

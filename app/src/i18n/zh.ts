@@ -265,6 +265,8 @@ export const zh = {
   updateAvailable: '发现新版本 {version}',
   downloadUpdate: '下载更新',
   updateDownloadHint: '若下载没有反应，可复制下面的地址：',
+  connectionFailed: '连接失败：{message}',
+  originAutoSwitched: '已自动切换到 {origin}',
   settingsLocaleZhCN: '简体中文',
   settingsLocaleEnUS: 'English',
 } as const

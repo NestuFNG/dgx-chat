@@ -1,5 +1,5 @@
 import { translate } from '../../i18n/index.js'
-import { getApiOrigin } from './origin.js'
+import { formatNetworkError, getApiOrigin } from './origin.js'
 
 /**
  * 云端接口（/auth/*、/api/*）的 HTTP 辅助：自动拼上运行期 origin，统一解析错误。
@@ -82,9 +82,13 @@ export const fetchApi = async (path: string, init: RequestInit = {}): Promise<Re
       throw error
     }
     if (controller.signal.aborted) {
-      throw new HttpError(undefined, 'Request timed out', 'network')
+      throw new HttpError(undefined, formatNetworkError('Request timed out', origin), 'network')
     }
-    throw new HttpError(undefined, error instanceof Error ? error.message : String(error), 'network')
+    throw new HttpError(
+      undefined,
+      formatNetworkError(error instanceof Error ? error.message : String(error), origin),
+      'network'
+    )
   } finally {
     clearTimeout(timer)
     init.signal?.removeEventListener('abort', forwardAbort)

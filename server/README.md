@@ -458,9 +458,10 @@ message_stop
 - 客户端回传的历史里只有 `read_link` 的 `server_tool_use` + `web_fetch_tool_result`，
   后端解析时全部接受并忽略（不会崩），见 `tests/test_translation.py::test_assistant_history_keeps_only_text`。
 
-> 🔴 **TODO（需要真实 key 才能验证，代码已就绪）**：`SEARCH_MODE=official` 的中继路径
-> 已用本地 mock 官方端点验证帧序与字段无损（`tests/test_sse.py`、`tests/test_search.py`），
-> 但**还没有对真实官方端点跑过整轮中继**。一条命令验证：
+> ✅ **`SEARCH_MODE=official` 已对真实官方端点整轮验证通过**（2026-11-17）：
+> 用真实 key 跑一轮带 `deepseek_web_search` 的对话，中继回来的 `server_tool_use` /
+> `web_search_tool_result` 帧序与字段全部合规（15 条来源通过客户端校验），
+> 整轮事件序列正常。复验命令：
 >
 > ```bash
 > DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY SEARCH_MODE=official \
@@ -587,32 +588,32 @@ curl -s http://127.0.0.1:8439/health      # {"ok":true,"status":"up"}
 
 ## 11. 已知限制 / 未实现
 
-1. **`SEARCH_MODE=official` 未对真实官方端点整轮验证**（缺 key 时的安全默认是 `dgx`），
-   验证命令见 §6 的 TODO。中继逻辑本身已有 mock 测试。
-2. **ASR/TTS 的 `openai` provider 未对真实 OpenAI 跑过**（无 key）；代码路径用假客户端做了
+1. **ASR/TTS 的 `openai` provider 未对真实 OpenAI 跑过**（无 key）；代码路径用假客户端做了
    请求形状与转码分支的单测，`deepseek` provider 已真实跑通 TTS→WAV→ASR 闭环。
-3. **文档解析只支持纯文本类**：PDF/Word/PPT 需要版面解析（官方 `rich_layout_recognition`），
-   这里直接忽略并继续（不报错、不崩）。SPEC §3.3 允许"其它忽略"。
-4. **`usage` 的 token 数是上游给的**：网关不开 `include_usage` 时为 0（客户端会显示 0）。
-5. **`daily_token_quota` 统计的是上游返回的 input+output 之和**，检索/title 的消耗不计入
+2. **文档解析没有版面识别**：PDF 用 `pypdf` 抽纯文本、DOCX 用 `python-docx` 抽段落与表格，
+   扫描件/图片型 PDF 抽不出内容（会明确报 400）。官方 `rich_layout_recognition` 那种版面
+   还原不在范围内。XLSX 见第 11 条。
+3. **`usage` 的 token 数是上游给的**：网关不开 `include_usage` 时为 0（客户端会显示 0）。
+4. **`daily_token_quota` 统计的是上游返回的 input+output 之和**，检索/title 的消耗不计入
    （检索走官方 key，需要单独在官方后台看余额）。
-6. **单进程内存限流**：多 worker 或多副本部署时每个进程独立计数（当前 compose 单进程）。
-7. **`/v1/tools/*` 不解码/重采样除 24k/mono 之外的输入**：ASR 原样转发上游，由上游负责解码。
-8. **`official` 中继会把 JSON 重新序列化**（字段不增不减、语义等价），不是字节级中继。
-9. **公网 litellm 网关不暴露 reasoning 通道**：思考开启时客户端不会收到 thinking 块（上游限制）；
+5. **`/v1/tools/*` 不解码/重采样除 24k/mono 之外的输入**：ASR 原样转发上游，由上游负责解码。
+6. **`official` 中继会把 JSON 重新序列化**（字段不增不减、语义等价），不是字节级中继。
+7. **公网 litellm 网关不暴露 reasoning 通道**：思考开启时客户端不会收到 thinking 块（上游限制）；
    关闭思考时用 `reasoning_effort:"none"` 同样不影响正文。**正文质量不受影响**。
-10. **公网网关会对 `thinking:{...}` 返回 400**：后端会自动去掉该参数重试，但每次切换方言会多一次
-    上游请求（只在端点方言配置错误时发生；默认 `reasoning_effort` 不会触发）。
-11. **XLSX 不支持**：`openpyxl` 不是本项目依赖（按需求"已是依赖才支持"跳过）；上传 xlsx 会跳过并
-    在 `x-dgx-notice` 里标注 `xlsx_not_supported`，不会报错。需要表格内容时请转成 CSV/文本。
-12. **注销账号保留 `usage_log` 与 `audit_log`**：前者用于管理员统计用量（不含聊天内容），
+8. **公网网关会对 `thinking:{...}` 返回 400**：后端会自动去掉该参数重试，但每种方言切换会多一次
+   上游请求（默认 `reasoning_effort` 不会触发）。
+9. **XLSX 不支持**：`openpyxl` 不是本项目依赖；上传 xlsx 会跳过并在 `x-dgx-notice` 里标注
+   `xlsx_not_supported`，不会报错。需要表格内容时请转成 CSV/文本。
+10. **注销账号保留 `usage_log` 与 `audit_log`**：前者用于管理员统计用量（不含聊天内容），
     后者是管理审计记录（actor_name 保留），如需彻底清除请管理员手动处理数据库。
-13. **`/api/sessions/sync` 只返回摘要与墓碑**，不返回会话正文；正文仍按需 `GET /api/sessions/{id}`。
-14. **限流器计数是单进程内存值**，`/admin/diagnostics` 里显示的是当前进程的状态。
-15. **数据库静态加密不是目标**：用户官方 Key / 语音端点 Key 以**明文**存放在 SQLite
+11. **`/api/sessions/sync` 只返回摘要与墓碑**，不返回会话正文；正文仍按需 `GET /api/sessions/{id}`。
+12. **限流器计数是单进程内存值**：多 worker 或多副本部署时每个进程独立计数（当前 compose 单进程），
+    `/admin/diagnostics` 里显示的也是当前进程的状态。
+13. **数据库静态加密不是目标**：用户官方 Key / 语音端点 Key 以**明文**存放在 SQLite
     `user_settings.data`；请依赖 NAS 卷加密、`data/` 目录权限与备份加密（见 §2.1）。
-16. **不校验用户 Key 是否有效**：`PUT /api/me/settings` 只做形状/长度校验；
+14. **不校验用户 Key 是否有效**：`PUT /api/me/settings` 只做形状/长度校验；
     真实可用性由 `/api/me/capabilities`（是否配置）与实际请求结果反映。
+15. **`SEARCH_MODE=official` 已对真实官方端点整轮验证**（见 §6），不再是已知缺口。
 
 ---
 

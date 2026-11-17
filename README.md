@@ -206,8 +206,8 @@ Found a security issue? See [SECURITY.md](SECURITY.md).
 ## Install the Android app
 
 A prebuilt, signed APK is committed at
-[`release/DGX-Chat-1.0.0.apk`](release/DGX-Chat-1.0.0.apk)
-(sha256 in [`release/DGX-Chat-1.0.0.apk.sha256`](release/DGX-Chat-1.0.0.apk.sha256)).
+[`release/DGX-Chat-1.0.1.apk`](release/DGX-Chat-1.0.1.apk)
+(sha256 in [`release/DGX-Chat-1.0.1.apk.sha256`](release/DGX-Chat-1.0.1.apk.sha256)).
 
 Copy it to the phone, allow installing from unknown sources, open it and enter
 **your** server address (`http://<host>:8439`) on the login screen, then sign in.

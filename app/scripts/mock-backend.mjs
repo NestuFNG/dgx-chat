@@ -23,6 +23,92 @@ const INVITE_CODE = process.env.MOCK_INVITE_CODE ?? 'DGX-INVITE-2026'
 /** 登录失败计数：同一用户名 1 分钟内失败 3 次后返回 429 */
 const loginFailures = new Map()
 
+/** 服务器级官方 Key（MOCK_NO_OFFICIAL=1 时视为未配置，用于测试搜索/语音缺 Key 分支） */
+const SERVER_OFFICIAL_KEY =
+  process.env.MOCK_NO_OFFICIAL === '1' ? '' : (process.env.MOCK_OFFICIAL_KEY ?? 'sk-server-official')
+const TTS_ASR_PROVIDERS = new Set(['deepseek', 'openai', 'deepseek_tools', 'disabled'])
+const SEARCH_PROVIDERS = new Set(['deepseek', 'brave', 'tavily', 'searxng', 'google_cse', 'none'])
+const SEARCH_MODES = new Set(['dgx', 'official', 'off'])
+
+/** @type {Map<string, any>} userId -> 非凭证设置 */
+const userSettings = new Map()
+/** @type {Map<string, {official:string,tts:string,asr:string,search:string}>} userId -> 明文 Key（只在 mock 内存里） */
+const userSecrets = new Map()
+
+const secretsFor = (userId) =>
+  userSecrets.get(userId) ?? { official: '', tts: '', asr: '', search: '' }
+const settingsFor = (userId) => userSettings.get(userId) ?? {}
+
+const maskSecret = (value) =>
+  value ? (value.length > 9 ? `${value.slice(0, 5)}…${value.slice(-4)}` : `${value[0]}…${value.at(-1)}`) : null
+
+/** GET/PUT 返回的掩码文档：非凭证设置原样 + 四个凭证块 */
+const publicSettings = (userId) => {
+  const stored = settingsFor(userId)
+  const secrets = secretsFor(userId)
+  const block = (name, extra) => ({
+    ...extra,
+    base_url: stored[name]?.base_url ?? null,
+    api_key: maskSecret(secrets[name]),
+    has_key: Boolean(secrets[name]),
+  })
+  const doc = {}
+  if (stored.model !== undefined) {
+    doc.model = stored.model
+  }
+  doc.official = block('official', {})
+  doc.tts = block('tts', {
+    provider: stored.tts?.provider ?? null,
+    model: stored.tts?.model ?? null,
+    voice: stored.tts?.voice ?? null,
+  })
+  doc.asr = block('asr', {
+    provider: stored.asr?.provider ?? null,
+    model: stored.asr?.model ?? null,
+    voice: stored.asr?.voice ?? null,
+  })
+  doc.search = block('search', {
+    mode: stored.search?.mode ?? null,
+    provider: stored.search?.provider ?? null,
+    max_results: stored.search?.max_results ?? null,
+  })
+  return doc
+}
+
+const capabilitiesFor = (userId) => {
+  const stored = settingsFor(userId)
+  const secrets = secretsFor(userId)
+  const officialUser = Boolean(secrets.official)
+  const officialServer = Boolean(SERVER_OFFICIAL_KEY)
+  const officialConfigured = officialUser || officialServer
+  const speechConfigured = (kind) => {
+    const provider = stored[kind]?.provider
+    if (provider && provider !== 'disabled') {
+      return true
+    }
+    return officialConfigured
+  }
+  const speechSource = (kind) => {
+    const provider = stored[kind]?.provider
+    if (provider && provider !== 'disabled') {
+      return 'user'
+    }
+    if (officialUser) {
+      return 'user'
+    }
+    return officialServer ? 'server' : null
+  }
+  return {
+    official: {
+      configured: officialConfigured,
+      source: officialUser ? 'user' : officialServer ? 'server' : null,
+    },
+    tts: { configured: speechConfigured('tts'), source: speechSource('tts') },
+    asr: { configured: speechConfigured('asr'), source: speechSource('asr') },
+    search: { available: officialConfigured, requires_official: true },
+  }
+}
+
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization,x-api-key,content-type,anthropic-beta',
@@ -59,6 +145,122 @@ const summarize = (session) => ({
   createdAt: session.createdAt,
   updatedAt: session.updatedAt,
 })
+
+const SETTINGS_BLOCKS = ['official', 'tts', 'asr', 'search']
+
+/**
+ * 按契约应用 PUT 子集：credential 字段支持字符串 / ""|null 清除 / "__keep__" 不变 / 省略不变；
+ * 非凭证顶层键整体替换；块内非凭证字段按字段合并。返回 {message,param} 表示 400。
+ */
+const applySettingsPatch = (userId, body) => {
+  const stored = { ...(userSettings.get(userId) ?? {}) }
+  const secrets = { ...secretsFor(userId) }
+  const bad = (message, param) => ({ message, param })
+  const checkString = (value, param) => {
+    if (value === null || value === undefined) {
+      return null
+    }
+    if (typeof value !== 'string' || value.length > 512) {
+      return bad(`${param} must be a string of at most 512 characters`, param)
+    }
+    return null
+  }
+
+  for (const [key, value] of Object.entries(body)) {
+    if (!SETTINGS_BLOCKS.includes(key)) {
+      stored[key] = value
+    }
+  }
+
+  for (const name of SETTINGS_BLOCKS) {
+    const input = body[name]
+    if (input === undefined) {
+      continue
+    }
+    if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+      return bad(`${name} must be an object`, name)
+    }
+    if (!stored[name]) {
+      stored[name] = {}
+    }
+    const current = { ...stored[name] }
+    for (const [field, value] of Object.entries(input)) {
+      const param = `${name}.${field}`
+      if (field === 'api_key') {
+        if (value === '__keep__') {
+          continue
+        }
+        if (value === null || value === '') {
+          secrets[name] = ''
+          continue
+        }
+        if (typeof value !== 'string' || value.length > 512) {
+          return bad('api_key must be a string of at most 512 characters', param)
+        }
+        secrets[name] = value
+        continue
+      }
+      if (name === 'search' && field === 'max_results') {
+        if (value === null) {
+          delete current[field]
+          continue
+        }
+        if (!Number.isInteger(value) || value < 1 || value > 20) {
+          return bad('search.max_results must be an integer between 1 and 20', param)
+        }
+        current[field] = value
+        continue
+      }
+      if (name === 'search' && field === 'mode') {
+        if (value === null) {
+          delete current[field]
+          continue
+        }
+        if (typeof value !== 'string' || !SEARCH_MODES.has(value)) {
+          return bad('invalid search.mode', param)
+        }
+        current[field] = value
+        continue
+      }
+      if (name === 'search' && field === 'provider') {
+        if (value === null) {
+          delete current[field]
+          continue
+        }
+        if (!SEARCH_PROVIDERS.has(value)) {
+          return bad('invalid search.provider', param)
+        }
+        current[field] = value
+        continue
+      }
+      if ((name === 'tts' || name === 'asr') && field === 'provider') {
+        if (value === null) {
+          delete current[field]
+          continue
+        }
+        if (!TTS_ASR_PROVIDERS.has(value)) {
+          return bad('invalid provider', param)
+        }
+        current[field] = value
+        continue
+      }
+      const problem = checkString(value, param)
+      if (problem) {
+        return problem
+      }
+      if (value === null) {
+        delete current[field]
+      } else {
+        current[field] = value
+      }
+    }
+    stored[name] = current
+  }
+
+  userSettings.set(userId, stored)
+  userSecrets.set(userId, secrets)
+  return null
+}
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`)
@@ -132,10 +334,53 @@ const server = createServer(async (req, res) => {
 
     // 兼容层接口不校验账号（对应 SPEC：/models、/anthropic/* 接受 token 或 API Key）
     const isCompat = path === '/models' || path.startsWith('/anthropic/')
-    const user = isCompat ? { id: 'compat', username: 'compat' } : userOf(req)
+    const user = isCompat
+      ? (userOf(req) ?? { id: 'compat', username: 'compat' })
+      : userOf(req)
     if (!user) {
       console.log(`[mock] ${method} ${path} -> 401`)
       unauthorized(res)
+      return
+    }
+
+    if (path === '/api/me/capabilities' && method === 'GET') {
+      console.log(`[mock] GET ${path} -> 200 (${user.username})`)
+      json(res, 200, capabilitiesFor(user.id))
+      return
+    }
+
+    if (path === '/api/me/settings' && method === 'GET') {
+      console.log(`[mock] GET ${path} -> 200 (${user.username})`)
+      json(res, 200, publicSettings(user.id))
+      return
+    }
+
+    if (path === '/api/me/settings' && method === 'PUT') {
+      let body
+      try {
+        body = JSON.parse((await readBody(req)).toString('utf8') || '{}')
+      } catch {
+        json(res, 400, {
+          error: { message: 'settings must be valid JSON', type: 'invalid_request_error' },
+        })
+        return
+      }
+      if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+        json(res, 400, {
+          error: { message: 'settings must be a JSON object', type: 'invalid_request_error' },
+        })
+        return
+      }
+      const problem = applySettingsPatch(user.id, body)
+      if (problem) {
+        console.log(`[mock] PUT ${path} -> 400 (${problem.param})`)
+        json(res, 400, {
+          error: { message: problem.message, type: 'invalid_request_error', param: problem.param },
+        })
+        return
+      }
+      console.log(`[mock] PUT ${path} -> 200 (${user.username})`)
+      json(res, 200, publicSettings(user.id))
       return
     }
 
@@ -175,6 +420,34 @@ const server = createServer(async (req, res) => {
               .filter((block) => block.type === 'text')
               .map((block) => block.text)
               .join('')
+
+      // 契约：官方 Key 缺失时，200 + SSE error 帧 + x-dgx-search 头
+      const wantsSearch =
+        Array.isArray(body.tools) &&
+        body.tools.some((tool) => tool?.type === 'deepseek_web_search')
+      if (wantsSearch && !capabilitiesFor(user.id).search.available) {
+        console.log(`[mock] POST ${path} -> 200 SSE (official_key_required)`)
+        res.writeHead(200, {
+          ...cors,
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+          'x-dgx-search': 'official_key_required',
+        })
+        res.write(
+          `event: error\ndata: ${JSON.stringify({
+            type: 'error',
+            error: {
+              message: '联网搜索需要 DeepSeek 官方 API Key。',
+              type: 'authentication_error',
+              code: 'official_key_required',
+            },
+          })}\n\n`
+        )
+        res.end()
+        return
+      }
+
       console.log(`[mock] POST ${path} -> 200 SSE ("${String(text).slice(0, 40)}")`)
       res.writeHead(200, {
         ...cors,

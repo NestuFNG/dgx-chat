@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { TranslationMessage } from '../../i18n/index.js'
+import { ApiError } from '../../services/api/client.js'
 import { transcribe } from '../../services/api/speech.js'
 import { getCredential } from '../../services/auth.js'
+import { useCapabilities } from '../../services/capabilities.js'
 import { startRecording, type Recording } from '../../services/speech/recorder.js'
 import { showToast } from '../base/toastState.js'
 
@@ -20,6 +22,24 @@ const describeRecordingError = (error: unknown): TranslationMessage => {
     }
     if (error.name === 'NotFoundError') {
       return { key: 'voiceInputNoDevice' }
+    }
+  }
+  return { key: 'voiceInputFailed' }
+}
+
+/** 转写失败：区分「没有可用官方 Key」与「Key 被上游拒绝」，其余保持通用文案 */
+const describeTranscribeError = (error: unknown): TranslationMessage => {
+  if (error instanceof ApiError && error.status !== undefined) {
+    const capabilities = useCapabilities.getState().data
+    if (capabilities && capabilities.asr.configured === false) {
+      return { key: 'speechOfficialKeyMissing' }
+    }
+    if (
+      /official api key|invalid[^.]*key|key[^.]*invalid|unauthor|authentication|401/i.test(
+        error.message
+      )
+    ) {
+      return { key: 'speechOfficialKeyRejected' }
     }
   }
   return { key: 'voiceInputFailed' }
@@ -84,9 +104,9 @@ export const useVoiceInput = (onText: (text: string) => void) => {
       } else {
         showToast({ key: 'voiceInputEmpty' })
       }
-    } catch {
+    } catch (error) {
       if (operationRef.current === operation && !controller?.signal.aborted) {
-        showToast({ key: 'voiceInputFailed' })
+        showToast(describeTranscribeError(error))
       }
     } finally {
       if (operationRef.current === operation) {

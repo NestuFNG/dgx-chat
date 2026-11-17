@@ -7,7 +7,7 @@ export type Notice = {
   /** 模板答复使用正文样式；其余统一为红色错误提示。 */
   presentation?: 'response'
   /** 需要用户处理的问题附带的操作 */
-  action?: 'apiKey' | 'topUp'
+  action?: 'apiKey' | 'topUp' | 'serverSettings'
 }
 
 const getTemplateText = (reply: AssistantMessage) =>
@@ -19,6 +19,10 @@ const getTemplateText = (reply: AssistantMessage) =>
 export const describeReply = (reply: AssistantMessage): Notice | null => {
   if (reply.status === 'error' && reply.error) {
     const { kind, status, localMessage } = reply.error
+    // 联网搜索缺少官方 Key：给出专用提示并引导到设置，而不是笼统失败
+    if (reply.error.code === 'official_key_required') {
+      return { text: translate('searchOfficialKeyRequired'), action: 'serverSettings' }
+    }
     // 导入的历史可能来自不同版本；不识别的文案沿用保存时的原文。
     const message =
       localMessage && isTranslationKey(localMessage.key)

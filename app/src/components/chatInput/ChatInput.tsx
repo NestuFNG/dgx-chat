@@ -21,9 +21,10 @@ import {
   useDrafts,
 } from '../../services/chat/drafts.js'
 import { stopReadAloud } from '../../services/speech/readAloud.js'
+import { useCapabilities } from '../../services/capabilities.js'
 import { IconButton } from '../base/IconButton.js'
 import { Tooltip } from '../base/Tooltip.js'
-import { ensureApiKey } from '../settings/settingsDialogState.js'
+import { ensureApiKey, openSettings } from '../settings/settingsDialogState.js'
 import { DragMask, useFileDrop } from './DragMask.js'
 import { showToast } from '../base/toastState.js'
 import { ACCEPT, useUploads } from '../../services/attachments.js'
@@ -53,6 +54,13 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
   const importingHistory = useChatStore((state) => state.importingHistory)
   const isMobile = useIsMobile()
   const search = useSettings((state) => state.search)
+  const capabilities = useCapabilities((state) => state.data)
+  // 智能搜索已开启但服务器明确表示不可用时，就近提示并给出设置入口
+  const searchWarning = search && capabilities !== null && !capabilities.search.available
+    ? capabilities.search.requires_official
+      ? t('searchNeedsOfficialKey')
+      : t('searchUnavailable')
+    : null
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const togglesRef = useRef<HTMLDivElement>(null)
@@ -233,10 +241,20 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
             disabled={!voice.available}
             seconds={voice.seconds}
             onClick={() => {
-              if (
-                voice.status !== 'idle' ||
-                (!useChatStore.getState().importingHistory && ensureApiKey())
-              ) {
+              if (voice.status !== 'idle') {
+                void voice.toggle()
+                return
+              }
+              if (useChatStore.getState().importingHistory) {
+                return
+              }
+              // 语音没有可用 Key 时直接说明，避免录完才报通用失败
+              const current = useCapabilities.getState().data
+              if (current && !current.asr.configured) {
+                showToast({ key: 'speechOfficialKeyMissing' })
+                return
+              }
+              if (ensureApiKey()) {
                 void voice.toggle()
               }
             }}
@@ -285,6 +303,18 @@ const Input = ({ sessionId }: { sessionId: string | null }) => {
           )}
         </div>
       </div>
+      {searchWarning ? (
+        <div className={styles.searchWarning} role="alert">
+          <span>{searchWarning}</span>
+          <button
+            type="button"
+            className={styles.searchWarningAction}
+            onClick={() => openSettings('server')}
+          >
+            {t('goToSettings')}
+          </button>
+        </div>
+      ) : null}
       {dragging ? <DragMask /> : null}
     </div>
   )

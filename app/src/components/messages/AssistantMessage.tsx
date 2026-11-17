@@ -106,6 +106,18 @@ export const AssistantMessage = memo(function AssistantMessage({
                 </button>
               </>
             ) : null}
+            {notice.action === 'serverSettings' ? (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  className={styles.noticeAction}
+                  onClick={() => openSettings('server')}
+                >
+                  {t('goToSettings')}
+                </button>
+              </>
+            ) : null}
           </span>
         </div>
       ) : null}

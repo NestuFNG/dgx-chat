@@ -21,12 +21,7 @@ $env:ANDROID_SDK_ROOT = $sdk
 $env:Path = "$jdk\bin;$sdk\platform-tools;" + $env:Path
 
 $node = (Get-Command node -ErrorAction SilentlyContinue).Source
-$pnpm = (Get-Command pnpm -ErrorAction SilentlyContinue).Source
 if (-not $node) { Write-Host "node not found on PATH"; exit 1 }
-if (-not $pnpm) {
-    Write-Host "pnpm not found on PATH. Install it or invoke this repo's build via 'node scripts/build.mjs' in app/."
-    exit 1
-}
 
 $variants = @(
     @{ name = "sanitized"; origin = ""; dest = Join-Path $repo "release\DGX-Chat-1.0.0.apk" }
@@ -44,8 +39,17 @@ foreach ($v in $variants) {
     if ($v.origin) { $env:DGX_API_ORIGIN = $v.origin } else { Remove-Item Env:\DGX_API_ORIGIN -ErrorAction SilentlyContinue }
 
     Push-Location (Join-Path $repo "app")
-    $buildOut = & $node $pnpm run build 2>&1 | Out-String
-    if ($buildOut -notmatch "compiled successfully") { Write-Host "BUILD OUTPUT:`n$buildOut" }
+    # Call the build script directly instead of going through pnpm: on Windows
+    # `pnpm` often resolves to a .ps1/.cmd shim which node cannot execute.
+    # Run `pnpm install` once in app/ and android/ beforehand.
+    $env:NODE_ENV = "production"
+    $buildOut = & $node "scripts\build.mjs" 2>&1 | Out-String
+    Remove-Item Env:\NODE_ENV -ErrorAction SilentlyContinue
+    if ($buildOut -notmatch "compiled successfully") {
+        Write-Host "BUILD FAILED:`n$buildOut"
+        Pop-Location
+        continue
+    }
     Pop-Location
 
     Push-Location (Join-Path $repo "android")
@@ -75,7 +79,9 @@ foreach ($v in $variants) {
 Remove-Item Env:\DGX_API_ORIGIN -ErrorAction SilentlyContinue
 Write-Host "`n========== restoring sanitized dist =========="
 Push-Location (Join-Path $repo "app")
-& $node $pnpm run build 2>&1 | Out-Null
+$env:NODE_ENV = "production"
+& $node "scripts\build.mjs" 2>&1 | Out-Null
+Remove-Item Env:\NODE_ENV -ErrorAction SilentlyContinue
 Pop-Location
 
 Write-Host ""

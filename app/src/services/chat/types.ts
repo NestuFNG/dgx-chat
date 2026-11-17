@@ -98,6 +98,8 @@ export type AssistantMessage = MessageBranch & {
     message: string
     status?: number
     localMessage?: TranslationMessage
+    /** 后端机器可读错误码，例如联网搜索缺少官方 Key 的 official_key_required */
+    code?: string
     /** 仅 upload：重新上传是否可能成功（网络、限流、服务端繁忙）；过大、格式不支持为 false */
     retryable?: boolean
   }

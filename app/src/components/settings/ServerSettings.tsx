@@ -22,6 +22,7 @@ import { IconEditOutline16 } from '../base/icons.js'
 import { Button } from '../base/Button.js'
 import { IconButton } from '../base/IconButton.js'
 import { showToast } from '../base/toastState.js'
+import { SpeechSettings } from './SpeechSettings.js'
 import settingsStyles from './Settings.module.css'
 import styles from './ServerSettings.module.css'
 
@@ -371,6 +372,8 @@ export const ServerSettings = () => {
           </div>
         </div>
       )}
+
+      <SpeechSettings />
     </>
   )
 }

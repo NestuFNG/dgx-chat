@@ -31,7 +31,9 @@ export class ApiError extends Error {
   constructor(
     readonly kind: ApiErrorKind,
     message: string | TranslationMessage,
-    readonly status?: number
+    readonly status?: number,
+    /** 后端/流错误帧里的机器可读错误码，例如 official_key_required */
+    readonly code?: string
   ) {
     super(typeof message === 'string' ? message : translate(message.key, message.params))
     this.name = 'ApiError'
@@ -174,6 +176,8 @@ export async function* streamMessage(
   if (!response.body || !contentType.includes('text/event-stream')) {
     throw await readErrorResponse(response, 'protocol', '')
   }
+  // 搜索缺官方 Key 时，服务端也会用响应头标记；SSE 错误帧里的 code 优先
+  const searchCode = response.headers.get('x-dgx-search') ?? undefined
   for await (const { event: eventName, data } of readServerSentEvents(response.body, signal)) {
     let payload: unknown
     try {
@@ -184,10 +188,10 @@ export async function* streamMessage(
       }
     }
     if (isErrorBody(payload)) {
-      throw new ApiError('stream', payload.error.message)
+      throw new ApiError('stream', payload.error.message, undefined, payload.error.code ?? searchCode)
     }
     if (eventName === 'error') {
-      throw new ApiError('stream', data)
+      throw new ApiError('stream', data, undefined, searchCode)
     }
     const event = readMessageEvent(payload)
     if (!event) {

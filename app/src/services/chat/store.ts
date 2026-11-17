@@ -1143,6 +1143,7 @@ const streamReply = async (sessionId: string, initial: AssistantMessage, request
             message: error.message,
             status: error.status,
             localMessage: error.localMessage,
+            code: error.code,
           })
         } else {
           reply = settleReply(reply, 'error', Date.now(), {

@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react'
 import { useTranslate } from '../i18n/index.js'
 import { useSettings } from '../services/settings.js'
 import { getStoredToken, initAuth, useAccountScope, useAuth } from '../services/auth.js'
+import { resetAccountSettings } from '../services/accountSettings.js'
+import { refreshCapabilities, resetCapabilities } from '../services/capabilities.js'
 import { flushSyncQueue, resetSyncQueue } from '../services/sync/queue.js'
 import { syncAfterLogin } from '../services/sync/pull.js'
 import { useIsMobile, useMobileViewport, usePreventPageScroll } from './viewport.js'
@@ -90,6 +92,7 @@ export const App = () => {
         }
       }
       await syncAfterLogin()
+      await refreshCapabilities()
     } catch (error) {
       // eslint-disable-next-line no-console
       console.warn('[sync] cloud sync failed', error)
@@ -112,6 +115,8 @@ export const App = () => {
     }
     previousScope.current = accountScope
     resetSyncQueue()
+    resetAccountSettings()
+    resetCapabilities()
     void (async () => {
       await resetChatForAccount()
       await syncAccount()

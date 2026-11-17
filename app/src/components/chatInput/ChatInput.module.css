@@ -330,3 +330,31 @@
     cursor: not-allowed;
   }
 }
+
+.searchWarning {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  box-sizing: border-box;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--dsw-alias-state-error-secondary);
+  border-radius: 10px;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.searchWarningAction {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--dsw-alias-brand-text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}

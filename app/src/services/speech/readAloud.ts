@@ -4,6 +4,7 @@ import { ApiError } from '../api/client.js'
 import { classifyApiError } from '../api/errors.js'
 import { synthesize, TTS_SAMPLE_RATE } from '../api/speech.js'
 import { getCredential } from '../auth.js'
+import { useCapabilities } from '../capabilities.js'
 import { useSettings } from '../settings.js'
 
 /**
@@ -61,6 +62,26 @@ export const describeReadAloudError = (error: unknown): TranslationMessage | str
   // 400 表示这段正文服务端无法合成，与其余失败区分开
   if (error instanceof ApiError && error.status === 400) {
     return { key: 'ttsUnavailable' }
+  }
+  // 语音链路没有可用 Key（自定义端点 / 官方 Key / 服务器默认都没有）
+  const capabilities = useCapabilities.getState().data
+  if (
+    error instanceof ApiError &&
+    error.status !== undefined &&
+    capabilities &&
+    capabilities.tts.configured === false
+  ) {
+    return { key: 'speechOfficialKeyMissing' }
+  }
+  // 上游明确拒绝 Key（DeepSeek 官方 Key 无效等）
+  if (
+    error instanceof ApiError &&
+    error.status !== undefined &&
+    /official api key|invalid[^.]*key|key[^.]*invalid|unauthor|authentication|401/i.test(
+      error.message
+    )
+  ) {
+    return { key: 'speechOfficialKeyRejected' }
   }
   switch (classifyApiError(error)) {
     case 'unauthorized':

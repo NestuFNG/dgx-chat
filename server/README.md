@@ -503,7 +503,7 @@ message_stop
 | `/docs` `/redoc` `/openapi.json` | ✅ 默认 404（`DGXCHAT_DOCS=1` 才开） | 关闭 |
 | 登录限流 | ✅ 每 (IP+用户名) 和每 IP 滑动窗口，429 + `Retry-After`；`Authorization: Bearer 用户名:密码` 这条便捷路径**共用同一组计数器**（否则可绕过登录限流做暴力破解） | 10 次 / 300s |
 | 凭据直连开关 | ✅ `ALLOW_CREDENTIALS_AUTH`（默认 1，SPEC §2.1 要求）；设 0 后只接受 token | 开启 |
-| 启动竞态 | ✅ 首个管理员判定在 `BEGIN IMMEDIATE` 真事务 + 进程内 `asyncio.Lock` 中完成；并发注册只会产生一个 admin | — |
+| 启动竞态 / 事务隔离 | ✅ 首个管理员判定在 `BEGIN IMMEDIATE` 真事务 + 进程内写锁中完成；事务期间**任何其它协程的写入都无法提交它**（写入统一走同一把锁，事务内写入不自动 commit），失败回滚连邀请码消耗一起撤销 | — |
 | 管理页 XSS | ✅ 行内操作不再把数据拼进 `onclick`：按钮用 `data-action`/`data-*`，页面注册**一个委托 click 监听**按 `dataset` 分发（用户名里的引号无法逃逸） | — |
 | 上传文件下发 | ✅ 只信任 MIME 白名单（声明值/扩展名都在白名单内，否则 `application/octet-stream`）；`text/html`、`image/svg+xml`、`*+xml`、`text/xml`、`application/xml`、`text/javascript` 一律 `Content-Disposition: attachment` + `Content-Security-Policy: sandbox`；**所有**文件响应带 `X-Content-Type-Options: nosniff` | — |
 | 自定义搜索端点 | ✅ 用户覆盖 `search.base_url` 却没给 `search.api_key` 时**不发送服务器搜索 Key**（发送不带 Authorization 的请求） | — |
@@ -622,7 +622,9 @@ curl -s http://127.0.0.1:8439/health      # {"ok":true,"status":"up"}
     真实可用性由 `/api/me/capabilities`（是否配置）与实际请求结果反映。
 15. **`SEARCH_MODE=official` 已对真实官方端点整轮验证**（见 §6），不再是已知缺口。
 16. **多 worker 部署**：首个管理员判定依赖 SQLite 的 `BEGIN IMMEDIATE`（跨进程写锁，配合
-    `busy_timeout`）；**不要**退化成"先 SELECT 再 INSERT"。单进程内另有 `asyncio.Lock` 兜底。
+    `busy_timeout`）；**不要**退化成"先 SELECT 再 INSERT"。单进程内所有写语句与事务共用同一把
+    `asyncio.Lock`（事务持有到提交/回滚），因此外部写入既不能插队也不能提前提交事务；子任务里的
+    写入会等待锁（不要在事务体内 `await` 一个会写库的子任务，否则会互相等待）。
     当前 compose 是单进程单副本，按现状部署即可。
 17. **凭据直连（`用户名:密码`）**：与 `/auth/login` 共用失败计数（10 次/5 分钟，按 IP 与
     IP+用户名）；如需彻底关闭该便捷路径，设置 `ALLOW_CREDENTIALS_AUTH=0`。

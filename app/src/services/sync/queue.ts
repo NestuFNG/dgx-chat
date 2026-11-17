@@ -1,4 +1,4 @@
-import { getStoredToken, handleUnauthorized } from '../auth.js'
+import { getAccountScope, getStoredToken, handleUnauthorized } from '../auth.js'
 import type { Session } from '../chat/types.js'
 import {
   cloudDeleteSession,
@@ -27,6 +27,8 @@ type Job<T> = {
   running: boolean
   /** 每次入队 / 更新内容递增；请求完成时用它判断是否又有更新内容 */
   revision: number
+  /** 任务所属账号命名空间（保存 / 上传发起时固定），发送时与当前账号不一致就丢弃 */
+  scope: string
 }
 
 /** 全局单调递增的队列版本号（会话与附件共用即可） */
@@ -36,7 +38,12 @@ const sessionJobs = new Map<string, Job<Session>>()
 const fileJobs = new Map<string, Job<Blob>>()
 const deleteJobs = new Map<
   string,
-  { attempts: number; timer: ReturnType<typeof setTimeout> | null; running: boolean }
+  {
+    attempts: number
+    timer: ReturnType<typeof setTimeout> | null
+    running: boolean
+    scope: string
+  }
 >()
 
 /**
@@ -69,10 +76,11 @@ const enqueueJob = <T>(
   jobs: Map<string, Job<T>>,
   id: string,
   value: T,
+  scope: string,
   flush: (id: string) => Promise<void>
 ) => {
   const job = jobs.get(id)
-  if (job) {
+  if (job && job.scope === scope) {
     job.value = value
     job.revision = ++revisionSequence
   } else {
@@ -82,6 +90,7 @@ const enqueueJob = <T>(
       timer: null,
       running: false,
       revision: ++revisionSequence,
+      scope,
     })
   }
   scheduleJob(jobs, id, flush)
@@ -97,12 +106,12 @@ const giveUp = (what: string, id: string, error: unknown) => {
   console.error(`[sync] ${what} ${id} gave up after ${MAX_ATTEMPTS} attempts`, error)
 }
 
-/** 会话内容 / 标题变化：合并后延迟推送 */
-export const queueSessionPush = (session: Session) => {
+/** 会话内容 / 标题变化：合并后延迟推送。scope 为保存 / 重命名发生时所在的账号 */
+export const queueSessionPush = (session: Session, scope: string) => {
   if (deletingSessions.has(session.id)) {
     return
   }
-  enqueueJob(sessionJobs, session.id, session, flushSession)
+  enqueueJob(sessionJobs, session.id, session, scope, flushSession)
 }
 
 /**
@@ -117,6 +126,12 @@ export const cancelSessionPush = (id: string) => {
 const flushSession = async (id: string): Promise<void> => {
   const job = sessionJobs.get(id)
   if (!job || job.running) {
+    return
+  }
+  // 任务所属账号与当前账号不一致：丢弃，避免用 B 的 token 上传 A 的内容。
+  // 内容仍在 A 的 IndexedDB 里，下次登录 A 时会由回填重新排队。
+  if (job.scope !== getAccountScope()) {
+    sessionJobs.delete(id)
     return
   }
   if (deletingSessions.has(id)) {
@@ -148,7 +163,10 @@ const flushSession = async (id: string): Promise<void> => {
     }
   } catch (error) {
     if (isUnauthorized(error)) {
-      handleUnauthorized()
+      // 只有失败请求仍属于当前账号时才登出；旧账号的 401 不能清掉新账号的会话
+      if (isScopeCurrent(guard)) {
+        handleUnauthorized()
+      }
       sessionJobs.delete(id)
       return
     }
@@ -185,12 +203,12 @@ const flushSession = async (id: string): Promise<void> => {
 }
 
 /** 删除会话：取消待推送 / 在途 PUT 的影响后删除远端；404 视为已删除 */
-export const queueSessionDelete = (id: string) => {
+export const queueSessionDelete = (id: string, scope: string) => {
   cancelSessionPush(id)
   if (deleteJobs.has(id)) {
     return
   }
-  deleteJobs.set(id, { attempts: 0, timer: null, running: false })
+  deleteJobs.set(id, { attempts: 0, timer: null, running: false, scope })
   scheduleDelete(id)
 }
 
@@ -208,6 +226,11 @@ const scheduleDelete = (id: string) => {
 const flushDelete = async (id: string): Promise<void> => {
   const job = deleteJobs.get(id)
   if (!job || job.running) {
+    return
+  }
+  // 账号已切换：旧账号的删除任务不能借新 token 发出去
+  if (job.scope !== getAccountScope()) {
+    deleteJobs.delete(id)
     return
   }
   const token = getStoredToken()
@@ -236,7 +259,9 @@ const flushDelete = async (id: string): Promise<void> => {
     unmarkSessionPushed(id)
   } catch (error) {
     if (isUnauthorized(error)) {
-      handleUnauthorized()
+      if (isScopeCurrent(guard)) {
+        handleUnauthorized()
+      }
       deleteJobs.delete(id)
       return
     }
@@ -261,13 +286,18 @@ const flushDelete = async (id: string): Promise<void> => {
 }
 
 /** 附件上传：同一 local_id 幂等 PUT；上传成功记入 markers，避免重复上传 */
-export const queueFilePush = (id: string, blob: Blob) => {
-  enqueueJob(fileJobs, id, blob, flushFile)
+export const queueFilePush = (id: string, blob: Blob, scope: string) => {
+  enqueueJob(fileJobs, id, blob, scope, flushFile)
 }
 
 const flushFile = async (id: string): Promise<void> => {
   const job = fileJobs.get(id)
   if (!job || job.running) {
+    return
+  }
+  // 账号已切换：不要用新账号 token 上传旧账号的附件
+  if (job.scope !== getAccountScope()) {
+    fileJobs.delete(id)
     return
   }
   const token = getStoredToken()
@@ -290,7 +320,9 @@ const flushFile = async (id: string): Promise<void> => {
     }
   } catch (error) {
     if (isUnauthorized(error)) {
-      handleUnauthorized()
+      if (isScopeCurrent(guard)) {
+        handleUnauthorized()
+      }
       fileJobs.delete(id)
       return
     }

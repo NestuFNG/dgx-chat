@@ -114,13 +114,14 @@ const openDatabase = (scope: string): Promise<IDBPDatabase<ChatDB>> =>
   })
 
 // 每个操作拿到连接后立即创建事务；IndexedDB 按创建顺序执行范围重叠的事务，读取总能看到之前发起的写入。
-const getDB = (): Promise<IDBPDatabase<ChatDB>> => {
-  const scope = getAccountScope()
+const getDBForScope = (scope: string): Promise<IDBPDatabase<ChatDB>> => {
   if (dbCache?.scope !== scope) {
     dbCache = { scope, promise: openDatabase(scope) }
   }
   return dbCache.promise
 }
+
+const getDB = (): Promise<IDBPDatabase<ChatDB>> => getDBForScope(getAccountScope())
 
 export const loadSessionSummaries = async (): Promise<SessionSummary[]> =>
   (await (await getDB()).getAll('sessionSummaries')).map(toSessionSummary)
@@ -129,8 +130,14 @@ export const loadSession = async (id: string): Promise<Session | undefined> =>
   (await getDB()).get('sessions', id)
 
 export const saveSession = async (session: Session, files: StoredFile[] = []): Promise<void> => {
+  // 写入哪个账号的库、同步任务属于哪个账号，都在保存开始时固定下来；
+  // 期间切换账号时，数据仍落在原账号的库里，队列任务在发送时会因 scope 不匹配被丢弃。
+  const scope = getAccountScope()
   const summary = storedSummary(session)
-  const tx = (await getDB()).transaction(['sessions', 'sessionSummaries', 'files'], 'readwrite')
+  const tx = (await getDBForScope(scope)).transaction(
+    ['sessions', 'sessionSummaries', 'files'],
+    'readwrite'
+  )
   await Promise.all([
     (async () => {
       try {
@@ -147,15 +154,19 @@ export const saveSession = async (session: Session, files: StoredFile[] = []): P
     tx.done,
   ])
   // 本地写入成功后再排队写穿云端；队列自身去抖、重试且不抛错，同步失败不影响本地使用。
-  queueSessionPush(session)
+  queueSessionPush(session, scope)
   for (const file of files) {
-    queueFilePush(file.id, file.blob)
+    queueFilePush(file.id, file.blob, scope)
   }
 }
 
 /** 未打开的会话也可重命名，只读取该会话，原子更新详情和列表。 */
 export const renameSession = async (id: string, title: string): Promise<void> => {
-  const tx = (await getDB()).transaction(['sessions', 'sessionSummaries'], 'readwrite')
+  const scope = getAccountScope()
+  const tx = (await getDBForScope(scope)).transaction(
+    ['sessions', 'sessionSummaries'],
+    'readwrite'
+  )
   let updated: Session | undefined
   await Promise.all([
     (async () => {
@@ -176,13 +187,16 @@ export const renameSession = async (id: string, title: string): Promise<void> =>
     tx.done,
   ])
   if (updated) {
-    queueSessionPush(updated)
+    queueSessionPush(updated, scope)
   }
 }
 
-/** 删除会话，仅清理已无会话引用的本地原件；远端文件不删。 */
-export const deleteSession = async (sessionId: string): Promise<void> => {
-  const tx = (await getDB()).transaction(['sessions', 'sessionSummaries', 'files'], 'readwrite')
+/** 从本地库删除会话与不再被引用的原件；不碰同步队列 */
+const removeSessionRecords = async (sessionId: string, scope: string): Promise<void> => {
+  const tx = (await getDBForScope(scope)).transaction(
+    ['sessions', 'sessionSummaries', 'files'],
+    'readwrite'
+  )
   await Promise.all([
     (async () => {
       try {
@@ -202,9 +216,26 @@ export const deleteSession = async (sessionId: string): Promise<void> => {
     })(),
     tx.done,
   ])
-  // 删除前先取消该会话所有待发送的 PUT，再排队 DELETE（DELETE 会等待同一 id 的在途 PUT 结束）。
+}
+
+/** 删除会话，仅清理已无会话引用的本地原件；远端文件不删。 */
+export const deleteSession = async (sessionId: string): Promise<void> => {
+  const scope = getAccountScope()
+  await removeSessionRecords(sessionId, scope)
+  // 用户主动删除：删除前先取消该会话所有待发送的 PUT，再排队 DELETE（DELETE 会等待同一 id 的在途 PUT 结束）。
   cancelSessionPush(sessionId)
-  queueSessionDelete(sessionId)
+  queueSessionDelete(sessionId, scope)
+}
+
+/**
+ * 只删本地、不通知服务器：用于消费服务端的删除墓碑，避免把 DELETE 再发回去
+ * 刷新墓碑时间、形成同步回环。用户主动删除仍然走 deleteSession。
+ */
+export const deleteSessionLocally = async (sessionId: string): Promise<void> => {
+  const scope = getAccountScope()
+  await removeSessionRecords(sessionId, scope)
+  // 本地没了，但可能还有排队中的 PUT 会把它复活；只取消队列，不发 DELETE
+  cancelSessionPush(sessionId)
 }
 
 const putFiles = async (store: 'files' | 'filesStaging', files: StoredFile[]) => {

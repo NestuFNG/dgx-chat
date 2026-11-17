@@ -87,7 +87,8 @@ export const parseSessionSyncResponse = (value: unknown): ParsedSessionSync => {
   const deleted = Array.isArray(value.deleted)
     ? value.deleted.filter((id): id is string => typeof id === 'string' && id.length > 0)
     : []
-  const rawCursor = value.since ?? value.serverTime
+  // 游标必须用 serverTime：后端会把请求里的 since 原样回显，用 since 会让游标永远不动。
+  const rawCursor = value.serverTime
   const cursor =
     typeof rawCursor === 'string' || typeof rawCursor === 'number' ? String(rawCursor) : null
   return { sessions, deleted, cursor }
@@ -201,7 +202,9 @@ export const refreshRemoteSessions = async (): Promise<SessionSummary[] | null> 
     return merged ? list : null
   } catch (error) {
     if (isUnauthorized(error)) {
-      handleUnauthorized()
+      if (guard.isCurrent()) {
+        handleUnauthorized()
+      }
     }
     throw error
   }
@@ -241,7 +244,9 @@ const pullSessionFiles = async (session: Session, guard: ScopeGuard) => {
       }
     } catch (error) {
       if (isUnauthorized(error)) {
-        handleUnauthorized()
+        if (guard.isCurrent()) {
+          handleUnauthorized()
+        }
         return
       }
       // eslint-disable-next-line no-console
@@ -274,7 +279,9 @@ export const fetchRemoteSession = async (id: string): Promise<Session | null> =>
     return session
   } catch (error) {
     if (isUnauthorized(error)) {
-      handleUnauthorized()
+      if (guard.isCurrent()) {
+        handleUnauthorized()
+      }
       return null
     }
     if (isNotFound(error)) {
@@ -303,7 +310,7 @@ const pushUnpushedFiles = async (guard: ScopeGuard) => {
       try {
         const blob = await db.loadFile(id)
         if (blob && guard.isCurrent()) {
-          queueFilePush(id, blob)
+          queueFilePush(id, blob, guard.scope)
         }
       } catch (error) {
         // eslint-disable-next-line no-console
@@ -333,7 +340,8 @@ export const syncAfterLogin = async (): Promise<void> => {
       {
         fetchSync: (since) => cloudSyncSessions(token, since),
         mergeSummaries: (list) => db.mergeRemoteSummaries(list),
-        deleteSession: (id) => db.deleteSession(id),
+        // 消费服务端墓碑：只删本地，绝不把 DELETE 发回去（否则会刷新墓碑形成回环）
+        deleteSession: (id) => db.deleteSessionLocally(id),
         cancelPush: (id) => cancelSessionPush(id),
         getCursor: () => getSyncCursor(guard.scope),
         setCursor: (since) => setSyncCursor(since, guard.scope),
@@ -345,7 +353,9 @@ export const syncAfterLogin = async (): Promise<void> => {
     }
   } catch (error) {
     if (isUnauthorized(error)) {
-      handleUnauthorized()
+      if (guard.isCurrent()) {
+        handleUnauthorized()
+      }
       return
     }
     if (!guard.isCurrent()) {
@@ -377,7 +387,7 @@ export const syncAfterLogin = async (): Promise<void> => {
     }
     const session = await db.loadSession(summary.id)
     if (session && guard.isCurrent()) {
-      queueSessionPush(session)
+      queueSessionPush(session, guard.scope)
     }
   }
   await pushUnpushedFiles(guard)

@@ -192,9 +192,13 @@ class Database:
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
         self.conn: aiosqlite.Connection | None = None
-        #: Serialises explicit transactions inside this process.  Cross-process
-        #: safety comes from BEGIN IMMEDIATE itself (extra workers block).
+        #: Serialises explicit transactions and every write statement inside this
+        #: process.  Cross-process safety comes from BEGIN IMMEDIATE itself.
         self._write_lock = asyncio.Lock()
+        #: Task that currently owns the open transaction (None when closed).  A
+        #: task-identity check (rather than a ContextVar) is deliberate: child
+        #: tasks inherit context but must still wait for the lock.
+        self._tx_owner: asyncio.Task[Any] | None = None
 
     # -- lifecycle ---------------------------------------------------------
     async def connect(self) -> None:
@@ -225,17 +229,39 @@ class Database:
         return self.conn
 
     # -- helpers -----------------------------------------------------------
+    def _in_tx(self) -> bool:
+        """True only for the task that actually owns the open transaction."""
+        return self._tx_owner is not None and self._tx_owner is asyncio.current_task()
+
     async def execute(self, sql: str, params: Sequence[Any] = (), *, commit: bool = True) -> None:
-        await self._c().execute(sql, params)
-        if commit:
-            await self._c().commit()
+        """Run one statement.
+
+        Writes are serialised with :meth:`transaction` using the same
+        ``asyncio.Lock``.  Inside an open transaction this method never commits
+        (regardless of ``commit=``), so a stray write from another coroutine can
+        neither commit nor be committed separately.
+        """
+        conn = self._c()
+        if self._in_tx():
+            await conn.execute(sql, params)
+            return
+        async with self._write_lock:
+            await conn.execute(sql, params)
+            if commit:
+                await conn.commit()
 
     async def executemany(
         self, sql: str, params: Iterable[Sequence[Any]], *, commit: bool = True
     ) -> None:
-        await self._c().executemany(sql, list(params))
-        if commit:
-            await self._c().commit()
+        conn = self._c()
+        rows = list(params)
+        if self._in_tx():
+            await conn.executemany(sql, rows)
+            return
+        async with self._write_lock:
+            await conn.executemany(sql, rows)
+            if commit:
+                await conn.commit()
 
     async def fetch_one(self, sql: str, params: Sequence[Any] = ()) -> aiosqlite.Row | None:
         async with self._c().execute(sql, params) as cur:
@@ -252,38 +278,51 @@ class Database:
         return row[0]
 
     async def commit(self) -> None:
-        await self._c().commit()
+        """Commit outside a transaction.  Inside one, the context manager owns it."""
+        if self._in_tx():
+            return
+        async with self._write_lock:
+            await self._c().commit()
 
     async def rollback(self) -> None:
-        await self._c().rollback()
+        if self._in_tx():
+            return
+        async with self._write_lock:
+            await self._c().rollback()
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator["Database"]:
-        """A real write transaction: ``BEGIN IMMEDIATE`` … ``COMMIT``/``ROLLBACK``.
+        """A real, isolated write transaction: ``BEGIN IMMEDIATE`` … ``COMMIT``.
 
-        Unlike :meth:`execute` (which auto-commits), nothing inside this block is
-        committed until it exits successfully.  ``BEGIN IMMEDIATE`` takes SQLite's
-        write lock up front, so the guarded decision (e.g. "is this the first
-        user?") cannot interleave with another process; the in-process
-        ``asyncio.Lock`` additionally prevents our own coroutines from
-        interleaving statements on the shared connection.
-
-        Multi-worker deployments: each worker holds its own lock, so correctness
-        relies on ``BEGIN IMMEDIATE`` blocking the other process (busy_timeout).
-        Do not replace it with a plain ``SELECT`` + later write.
+        Guarantees:
+          * the whole body is atomic — a failure rolls back every statement,
+            including side effects such as invite-code consumption;
+          * no other coroutine's write can interleave: every write path takes the
+            same in-process ``asyncio.Lock`` for its whole duration, and writes
+            inside the transaction are marked via a ContextVar so they never
+            commit early;
+          * ``BEGIN IMMEDIATE`` takes SQLite's write lock immediately, so other
+            processes block (``busy_timeout``) instead of observing a partial
+            state.  Multi-worker deployments therefore rely on that lock; never
+            replace this with SELECT-then-INSERT.
         """
         conn = self._c()
         async with self._write_lock:
-            await conn.execute("BEGIN IMMEDIATE")
+            owner = asyncio.current_task()
+            self._tx_owner = owner
             try:
-                yield self
-                await conn.commit()
-            except BaseException:
+                await conn.execute("BEGIN IMMEDIATE")
                 try:
-                    await conn.rollback()
-                except Exception:  # noqa: BLE001 - rollback must not mask the error
-                    logger.warning("rollback failed", exc_info=True)
-                raise
+                    yield self
+                    await conn.commit()
+                except BaseException:
+                    try:
+                        await conn.rollback()
+                    except Exception:  # noqa: BLE001 - rollback must not mask the error
+                        logger.warning("rollback failed", exc_info=True)
+                    raise
+            finally:
+                self._tx_owner = None
 
 
 def json_dumps(value: Any) -> str:

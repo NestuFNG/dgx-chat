@@ -18,6 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import admin as admin_module
+from app import auth as auth_module
 from app.config import SearchConfig
 from app.db import Database
 from app.main import create_app
@@ -348,6 +349,132 @@ async def test_transaction_commits_and_rolls_back(tmp_path):
         assert await db.fetch_value("SELECT COUNT(*) FROM t", (), 0) == 1
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_external_write_cannot_commit_an_open_transaction(tmp_path):
+    """The audited bug: another coroutine's write committed our transaction."""
+    db = Database(tmp_path / "isolation.db")
+    await db.connect()
+    try:
+        await db.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)")
+
+        async def external_writer() -> None:
+            await asyncio.sleep(0.05)
+            await db.execute("INSERT INTO t (v) VALUES ('external')", commit=True)
+
+        writer: asyncio.Task | None = None
+        with pytest.raises(RuntimeError):
+            async with db.transaction():
+                await db.execute("INSERT INTO t (v) VALUES ('inside')", commit=False)
+                writer = asyncio.create_task(external_writer())
+                await asyncio.sleep(0.15)
+                # The external write is blocked on the lock; only our row exists.
+                inside_count = await db.fetch_value("SELECT COUNT(*) FROM t", (), 0)
+                assert inside_count == 1, "external write interleaved into the transaction"
+                raise RuntimeError("force rollback")
+        assert writer is not None
+        await writer
+        values = [row["v"] for row in await db.fetch_all("SELECT v FROM t ORDER BY id")]
+        assert values == ["external"], values
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_registration_does_not_burn_invite_under_concurrent_write(
+    tmp_path, monkeypatch
+):
+    """The reviewer's reproduction: 409 must leave the invite untouched.
+
+    A second request performs an ordinary write (PUT /api/me/settings) while the
+    registration transaction is open, between invite consumption and the failing
+    insert.  That write must neither commit nor be committed by the transaction.
+    """
+    settings = build_settings(tmp_path, registration_mode="invite")
+    app = create_app(settings)
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            admin = await client.post(
+                "/auth/register", json={"username": "admin1", "password": "passw0rd"}
+            )
+            assert admin.status_code == 200, admin.text
+            token = admin.json()["token"]
+            admin_headers = {"Authorization": f"Bearer {token}"}
+            invite = await client.post(
+                "/admin/invites", headers=admin_headers, json={"max_uses": 1}
+            )
+            code = invite.json()["code"]
+
+            started = asyncio.Event()
+            original_consume = auth_module.consume_invite_locked
+
+            async def hooked_consume(db, invite_code):  # noqa: ANN001
+                await original_consume(db, invite_code)
+                started.set()
+                # Give the unrelated write a chance to (incorrectly) commit us.
+                await asyncio.sleep(0.15)
+
+            monkeypatch.setattr(auth_module, "consume_invite_locked", hooked_consume)
+
+            async def failing_registration():
+                return await client.post(
+                    "/auth/register",
+                    json={
+                        "username": "admin1",  # duplicate -> UNIQUE -> 409
+                        "password": "passw0rd",
+                        "invite_code": code,
+                    },
+                )
+
+            async def unrelated_write():
+                await started.wait()
+                return await client.put(
+                    "/api/me/settings",
+                    headers=admin_headers,
+                    json={"model": {"id": "concurrent"}},
+                )
+
+            registration, write = await asyncio.gather(
+                failing_registration(), unrelated_write()
+            )
+            assert registration.status_code == 409, registration.text
+            assert write.status_code == 200, write.text
+
+            listing = await client.get("/admin/invites", headers=admin_headers)
+            row = next(item for item in listing.json()["invites"] if item["code"] == code)
+            assert row["usedCount"] == 0, "invite was consumed by a failed registration"
+            assert row["usesLeft"] == 1
+            # The unrelated write itself must have been persisted.
+            stored = await client.get("/api/me/settings", headers=admin_headers)
+            assert stored.json()["model"] == {"id": "concurrent"}
+
+
+@pytest.mark.asyncio
+async def test_successful_registration_consumes_invite_exactly_once(tmp_path):
+    settings = build_settings(tmp_path, registration_mode="invite")
+    app = create_app(settings)
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            admin = await client.post(
+                "/auth/register", json={"username": "admin1", "password": "passw0rd"}
+            )
+            token = admin.json()["token"]
+            headers = {"Authorization": f"Bearer {token}"}
+            code = (
+                await client.post("/admin/invites", headers=headers, json={"max_uses": 1})
+            ).json()["code"]
+            created = await client.post(
+                "/auth/register",
+                json={"username": "invitee", "password": "passw0rd", "invite_code": code},
+            )
+            assert created.status_code == 200, created.text
+            listing = await client.get("/admin/invites", headers=headers)
+            row = next(item for item in listing.json()["invites"] if item["code"] == code)
+            assert row["usedCount"] == 1
+            assert row["usesLeft"] == 0
 
 
 @pytest.mark.asyncio

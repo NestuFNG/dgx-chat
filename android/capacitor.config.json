@@ -1,0 +1,12 @@
+{
+  "appId": "com.dgxchat.app",
+  "appName": "DGX Chat",
+  "webDir": "../app/dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": true,
+    "webContentsDebuggingEnabled": true
+  }
+}

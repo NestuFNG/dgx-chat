@@ -1,0 +1,29 @@
+# local environment / secrets
+.env
+.env.local
+.env.local-test
+*.env
+!*.env.example
+
+# runtime data
+data/
+web/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.uv/
+.mypy_cache/
+
+# test / dev artifacts
+artifacts/
+*.log
+.tmpchg/
+.tmpchg.*

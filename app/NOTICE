@@ -1,0 +1,13 @@
+DGX Chat
+=======
+
+DGX Chat is a self-hosted, multi-device chat front end built on top of the
+open-source project deepseek-ai/chat-demo.
+
+  Upstream: https://github.com/deepseek-ai/chat-demo
+  License:  MIT (see LICENSE)
+
+The upstream copyright notice and the MIT license are retained verbatim in
+LICENSE. Modifications in this repository include: a runtime-configurable API
+origin, account login/registration, cloud session synchronisation, and
+DGX Chat branding.

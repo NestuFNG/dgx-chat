@@ -1,0 +1,20 @@
+# Build artifacts / generated native project bits
+node_modules/
+dist-out/
+android/.gradle/
+android/build/
+android/app/build/
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+android/app/src/main/res/xml/config.xml
+
+# Local machine paths
+android/local.properties
+
+# Signing material (keystore itself is kept in-workspace for this project;
+# uncomment the line below if the repo ever leaves this machine)
+# keystore/
+
+# Secrets
+keystore/keystore.properties

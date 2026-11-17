@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DGX Chat talks to a plain-HTTP backend until a real domain + TLS certificate
+  exists. Android 9+ blocks cleartext by default, so cleartext is permitted
+  app-wide here (matches android:usesCleartextTraffic="true" in the manifest;
+  the network security config wins on API 24+).
+
+  cleartextTrafficPermitted is deliberately true for ALL hosts: the server
+  address is chosen at runtime on the login screen, so it cannot be pinned in
+  advance. When your backend has HTTPS, set it to false here and rebuild.
+
+  When you ship HTTPS: flip cleartextTrafficPermitted to "false" and drop the
+  domain-config block below.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <!-- Always-cleartext development hosts. -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

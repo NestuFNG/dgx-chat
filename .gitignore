@@ -1,0 +1,100 @@
+# =============================================================================
+# Secrets and private operator files — never commit any of these.
+# =============================================================================
+.env
+.env.*
+!.env.example
+!*.env.example
+!*.env.deploy.example
+!deploy/.env.deploy.example
+server/.env
+server/.env.local-test
+deploy/.env.deploy
+tools/nas.env
+tools/.admin_token.txt
+tools/.e2e_token.txt
+tools/.gh_login.txt
+tools/.gh_*
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+keystore.properties
+
+# Private operator notes (host names, admin password, invite codes).
+DEPLOY_INFO.md
+
+# =============================================================================
+# Third-party / upstream reference clones (read-only, not ours to publish)
+# =============================================================================
+chat-demo/
+toolchain/
+
+# =============================================================================
+# Build output
+# =============================================================================
+node_modules/
+dist/
+dist-out/
+build/
+app/dist/
+app/.pnpm-store/
+android/.gradle/
+android/android/.gradle/
+android/android/build/
+android/android/app/build/
+android/android/capacitor-cordova-android-plugins/build/
+android/android/local.properties
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+.gradle/
+
+# =============================================================================
+# Runtime data and logs
+# =============================================================================
+data/
+web/
+server/data/
+server/web/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.log
+!.github/**
+server/.tmpchg/
+server/.tmpchg.*
+tools/*.sse
+tools/*.pcm
+tools/*.wav
+server/artifacts/
+
+# =============================================================================
+# Python
+# =============================================================================
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+.uv/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# =============================================================================
+# Editors / OS
+# =============================================================================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~

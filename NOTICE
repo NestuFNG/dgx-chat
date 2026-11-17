@@ -1,0 +1,30 @@
+DGX Chat
+========
+
+Copyright (c) 2026 DGX Chat contributors
+
+This product includes software developed as part of the
+deepseek-ai/chat-demo project.
+
+  Upstream:  https://github.com/deepseek-ai/chat-demo
+  License:   MIT
+  Copyright: Copyright (c) 2026 DeepSeek
+
+The upstream MIT license text and copyright notice are retained verbatim in
+app/LICENSE (the front-end source tree) and are reproduced in this repository's
+LICENSE obligations. The upstream NOTICE is retained in app/NOTICE.
+
+`app/` is a modified copy of the upstream front end. Modifications include:
+
+  - a runtime-configurable API origin (build-time constant replaced by a
+    settings-driven value), instead of a fixed build-time endpoint;
+  - account login, registration and an authentication gate;
+  - cloud session and attachment synchronisation against a self-hosted backend;
+  - voice input/output wiring and server-side speech endpoints;
+  - rebranding (DGX Chat), default locale and icons.
+
+`android/` is a Capacitor shell that wraps the built web bundle; it contains no
+upstream source code.
+
+Third-party runtime dependencies are listed in app/package.json,
+android/package.json and server/requirements*.txt, and keep their own licenses.

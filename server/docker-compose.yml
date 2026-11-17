@@ -1,0 +1,51 @@
+# DGX Chat backend — container deployment.
+#
+#   <deploy-dir>/
+#     app/    <- this directory (Dockerfile, app/, docker-compose.yml)
+#     data/   <- SQLite + uploaded files (bind mount)
+#     web/    <- the built front-end, served at "/" (read-only mount)
+#
+#   cd app && docker compose up -d --build
+#
+# Requires a x86_64 or arm64 Linux host with Docker Engine + the compose plugin.
+# The paths above are siblings of this file, so the tree can live anywhere.
+
+services:
+  dgxchat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dgxchat:1.0.0
+    container_name: dgxchat
+    restart: unless-stopped
+    ports:
+      - "8439:8439"
+    env_file:
+      - .env
+    environment:
+      # These win over .env so the container paths stay correct.
+      DGXCHAT_DATA_DIR: /data
+      DGXCHAT_HOST: 0.0.0.0
+      DGXCHAT_PORT: "8439"
+      WEB_DIR: /app/web
+    volumes:
+      # Siblings of app/ so the code directory can be replaced wholesale on
+      # deploy without touching persistent data or the published web bundle.
+      - ../data:/data
+      - ../web:/app/web:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8439/health', timeout=3).status == 200 else 1)"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    stop_grace_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

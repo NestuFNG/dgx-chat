@@ -116,3 +116,8 @@ android/keystore/
 # Private secret-scan targets for tools/audit_history.py
 tools/audit_patterns.local.txt
 
+
+# Scratch files used while committing
+tools/_*.txt
+server/tests/_*.log
+

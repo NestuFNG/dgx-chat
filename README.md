@@ -1,5 +1,7 @@
 # DGX Chat
 
+**English** | [简体中文](README.zh-CN.md)
+
 **A self-hosted, multi-user chat UI for your own OpenAI-compatible model
 gateway — with accounts, cloud-synced sessions, web search, speech, and an
 Android app.**
@@ -226,9 +228,10 @@ Found a security issue? See [SECURITY.md](SECURITY.md).
 
 ## Install the Android app
 
-A prebuilt, signed APK is committed at
-[`release/DGX-Chat-1.0.1.apk`](release/DGX-Chat-1.0.1.apk)
-(sha256 in [`release/DGX-Chat-1.0.1.apk.sha256`](release/DGX-Chat-1.0.1.apk.sha256)).
+A prebuilt, signed APK is attached to the
+[latest release](https://github.com/NestuFNG/dgx-chat/releases/latest) and also
+committed at [`release/DGX-Chat-1.0.2.apk`](release/DGX-Chat-1.0.2.apk)
+(sha256 in [`release/DGX-Chat-1.0.2.apk.sha256`](release/DGX-Chat-1.0.2.apk.sha256)).
 
 Copy it to the phone, allow installing from unknown sources, open it and enter
 **your** server address (`http://<host>:8439`) on the login screen, then sign in.
@@ -321,33 +324,21 @@ in [app/LICENSE](app/LICENSE), [app/NOTICE](app/NOTICE) and [NOTICE](NOTICE).
 
 ## 中文简介
 
+完整中文文档见 **[README.zh-CN.md](README.zh-CN.md)**。
+
 **DGX Chat** 是一个自托管的多人聊天前端 + 后端：前端来自
 [deepseek-ai/chat-demo](https://github.com/deepseek-ai/chat-demo)（MIT）并做了改造，
 后端是 FastAPI + SQLite，打包成一个 Docker 镜像。把它指向你自己的
 OpenAI 兼容推理网关（vLLM / llama.cpp / Ollama / LiteLLM 或任意云服务），
 家里所有设备登录同一个账号就能看到同一份会话历史。
 
-**一键部署**（需要 docker 与 docker compose）：
+一键部署（需要 docker 与 docker compose）：
 
 ```sh
+git clone https://github.com/NestuFNG/dgx-chat.git && cd dgx-chat
 ./scripts/quickstart.sh                     # Linux / macOS / NAS
 pwsh ./scripts/quickstart.ps1               # Windows
 ```
 
-脚本会在缺少 `.env` 时自动生成（随机项自动随机），启动服务并等待 `/health`，
-然后打印访问地址和日志命令；重复执行不会覆盖已有配置和数据。
-
 启动后打开 `http://localhost:8439/`，**第一个注册的账号自动成为管理员**，
 之后在 `/admin` 里发邀请码或创建用户。
-
-**怎么接自己的模型**：改 `.env` 里的 `DGX_BASE_URL`（OpenAI 兼容的
-`/chat/completions` 地址）、`DGX_API_KEY`（网关不鉴权就留空）、
-`DGX_MODEL_MAP`（把客户端的两个模型 id 映射到你的模型名）；`DEEPSEEK_API_KEY`
-是可选的，只用于联网检索、TTS 和 ASR，不参与正文生成。
-
-**已知限制**：不支持 PDF/Word 版面识别（只处理可解码为文本的内容）；限流是
-单进程内存计数；在一台设备删除的会话不会广播到其他设备（同步为后写覆盖）；
-数据卷不加密。
-
-**许可证**：MIT（见 [LICENSE](LICENSE)）；前端源自 chat-demo，其 LICENSE 与
-NOTICE 一并保留。

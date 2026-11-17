@@ -1,5 +1,0 @@
-ci: use the runner's preinstalled Android SDK
-
-android-actions/setup-android@v3 runs `sdkmanager tools`, which no longer exists,
-so the step died on the Ubuntu 26.04 runner image before anything could build.
-The image already provides an SDK, so configure that one directly.

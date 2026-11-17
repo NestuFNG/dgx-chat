@@ -43,7 +43,7 @@ jobs:
         run: python -m pytest -q
 
   frontend:
-    name: Front end (typecheck + build)
+    name: Front end (typecheck, tests, build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -68,6 +68,9 @@ jobs:
 
       - name: Typecheck
         run: pnpm type
+
+      - name: Unit tests
+        run: pnpm test
 
       - name: Build
         run: pnpm build

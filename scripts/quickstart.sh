@@ -133,25 +133,24 @@ if [ "$STATUS_ONLY" -eq 0 ]; then
 
     if [ "$NEED_BUILD" -eq 0 ]; then
         step "Web UI already up to date in web/"
-    elif [ -f "app/dist/index.html" ] && [ ! -n "$(find app/src -newer app/dist/index.html -print -quit 2>/dev/null)" ] && [ -n "$REBUILD_WEB" ] && [ "$REBUILD_WEB" -eq 0 ]; then
-        step "Publishing app/dist into web/"
+    elif [ "$API_ONLY" -eq 0 ] && command -v pnpm >/dev/null 2>&1; then
+        step "Building the web UI (pnpm)"
+        ( cd app && pnpm install --frozen-lockfile && pnpm build ) \
+            || die "the web UI failed to build; see the output above."
         mkdir -p web && cp -R app/dist/. web/
-    elif [ "$API_ONLY" -eq 0 ]; then
-        if command -v pnpm >/dev/null 2>&1; then
-            step "Building the web UI (pnpm)"
-            ( cd app && pnpm install --frozen-lockfile && pnpm build )
-            mkdir -p web && cp -R app/dist/. web/
-        elif [ -f "app/dist/index.html" ]; then
-            warn "pnpm is not available; publishing the existing app/dist instead.
-      Rebuild it elsewhere for the current source: cd app && pnpm install && pnpm build"
-            mkdir -p web && cp -R app/dist/. web/
-        else
-            warn "no web/index.html, no app/dist and no pnpm — starting the API only.
+    elif [ -f "app/dist/index.html" ]; then
+        # No pnpm: we can only publish what is already built. Say so, because a
+        # stale bundle next to a new backend is how upgrades go wrong.
+        step "Publishing the existing app/dist into web/ (pnpm not available)"
+        warn "app/dist may be older than app/src; rebuild it elsewhere with
+      'cd app && pnpm install && pnpm build' if anything looks stale."
+        mkdir -p web && cp -R app/dist/. web/
+    elif [ "$API_ONLY" -eq 1 ]; then
+        mkdir -p web
+    else
+        warn "no pnpm and no app/dist — starting the API only.
       Build the UI elsewhere with 'cd app && pnpm install && pnpm build',
       then copy app/dist/* into ./web/ and re-run." >&2
-            mkdir -p web
-        fi
-    else
         mkdir -p web
     fi
 fi

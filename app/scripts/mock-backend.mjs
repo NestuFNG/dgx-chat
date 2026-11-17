@@ -273,6 +273,41 @@ const server = createServer(async (req, res) => {
     return
   }
 
+  // 发布清单（公开静态文件）：用 MOCK_LATEST_VERSION / MOCK_LATEST_NOTES 模拟新版本
+  if (method === 'GET' && path === '/release/latest.json') {
+    const version = process.env.MOCK_LATEST_VERSION ?? '1.0.0'
+    console.log(`[mock] GET ${path} -> 200 (version ${version})`)
+    json(res, 200, {
+      generatedAt: new Date().toISOString(),
+      latest: {
+        version,
+        versionCode: 1,
+        notes: process.env.MOCK_LATEST_NOTES ?? '',
+      },
+      variants: [
+        {
+          name: 'domain',
+          origin: 'https://chat.example.com:9443',
+          url: `/release/DGX-Chat-${version}-domain.apk`,
+          sha256: 'deadbeef',
+        },
+        {
+          name: 'lan',
+          origin: 'http://192.168.1.10:8439',
+          url: `/release/DGX-Chat-${version}-nas.apk`,
+          sha256: 'deadbeef',
+        },
+        {
+          name: 'generic',
+          origin: null,
+          url: `/release/DGX-Chat-${version}.apk`,
+          sha256: 'deadbeef',
+        },
+      ],
+    })
+    return
+  }
+
   try {
     if (method === 'POST' && (path === '/auth/register' || path === '/auth/login')) {
       const body = JSON.parse((await readBody(req)).toString('utf8') || '{}')

@@ -4,6 +4,7 @@ import { useSettings } from '../services/settings.js'
 import { getStoredToken, initAuth, useAccountScope, useAuth } from '../services/auth.js'
 import { resetAccountSettings } from '../services/accountSettings.js'
 import { refreshCapabilities, resetCapabilities } from '../services/capabilities.js'
+import { resetUpdateCache } from '../services/update.js'
 import { flushSyncQueue, resetSyncQueue } from '../services/sync/queue.js'
 import { syncAfterLogin } from '../services/sync/pull.js'
 import { useIsMobile, useMobileViewport, usePreventPageScroll } from './viewport.js'
@@ -117,6 +118,7 @@ export const App = () => {
     resetSyncQueue()
     resetAccountSettings()
     resetCapabilities()
+    resetUpdateCache()
     void (async () => {
       await resetChatForAccount()
       await syncAccount()

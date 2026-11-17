@@ -34,6 +34,7 @@ import { Modal } from '../base/Modal.js'
 import { Select } from '../base/Select.js'
 import { showToast } from '../base/toastState.js'
 import { ApiKeyConfirm, ApiKeyField, useApiKeyEditor } from './ApiKeyField.js'
+import { AboutUpdate } from './AboutUpdate.js'
 import { ServerSettings } from './ServerSettings.js'
 import { closeSettings, useSettingsDialog, type SettingsSection } from './settingsDialogState.js'
 import styles from './Settings.module.css'
@@ -123,6 +124,7 @@ const SettingsContent = () => {
               <LocaleSetting />
               <TtsVoiceSetting />
               <LocationSetting />
+              <AboutUpdate />
               <div className={styles.about}>{t('aboutAttribution')}</div>
             </>
           ) : (

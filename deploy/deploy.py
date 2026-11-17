@@ -170,24 +170,39 @@ def republish_apk():
     """Put release/*.apk back into the web root after it was wiped.
 
     The web directory is replaced wholesale on every sync, which would silently
-    break the download link at /release/. Re-upload any published APKs.
+    break the download link at /release/ and the in-app update manifest.
     """
     rel_dir = os.path.join(HERE, "..", "release")
-    if not os.path.isdir(rel_dir):
-        return
-    apks = [f for f in os.listdir(rel_dir) if f.endswith((".apk", ".sha256"))]
-    if not apks:
-        return
-    nas_ssh.run("mkdir -p %s/release" % REMOTE_WEB)
-    for name in apks:
-        path = os.path.join(rel_dir, name)
-        with open(path, "rb") as fh:
-            data = fh.read()
-        if data:
-            nas_ssh.exec_stdin("cat > %s/release/%s" % (REMOTE_WEB, name), data)
-    rc, out, err = nas_ssh.run("ls -l %s/release" % REMOTE_WEB)
-    print("re-published APK(s):")
-    print(out)
+    if os.path.isdir(rel_dir):
+        apks = [f for f in os.listdir(rel_dir) if f.endswith((".apk", ".sha256"))]
+        if apks:
+            nas_ssh.run("mkdir -p %s/release" % REMOTE_WEB)
+            for name in apks:
+                path = os.path.join(rel_dir, name)
+                with open(path, "rb") as fh:
+                    data = fh.read()
+                if data:
+                    nas_ssh.exec_stdin("cat > %s/release/%s" % (REMOTE_WEB, name), data)
+            rc, out, err = nas_ssh.run("ls -l %s/release" % REMOTE_WEB)
+            print("re-published APK(s):")
+            print(out)
+    _republish_manifest()
+
+
+def _republish_manifest():
+    """Regenerate release/latest.json so the in-app updater keeps working."""
+    env = load_env()
+    for key in ("APK_LAN_ORIGIN", "APK_DOMAIN_ORIGIN", "APK_RELEASE_NOTES"):
+        if env.get(key):
+            os.environ[key] = env[key]
+    sys.path.insert(0, os.path.join(HERE, "..", "tools"))
+    try:
+        import publish_apk
+        manifest = publish_apk.publish_manifest()
+        print("update manifest: latest=%s variants=%d"
+              % (manifest["latest"]["version"], len(manifest["variants"])))
+    except Exception as exc:  # never let this break a deploy
+        print("WARNING: could not publish the update manifest: %r" % (exc,))
 
 
 def do_sync():

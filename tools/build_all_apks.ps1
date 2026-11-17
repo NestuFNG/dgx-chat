@@ -23,14 +23,17 @@ $env:Path = "$jdk\bin;$sdk\platform-tools;" + $env:Path
 $node = (Get-Command node -ErrorAction SilentlyContinue).Source
 if (-not $node) { Write-Host "node not found on PATH"; exit 1 }
 
+# Version comes from app/package.json so file names track releases.
+
+$version = (Get-Content (Join-Path $repo "app\package.json") -Raw | ConvertFrom-Json).version
 $variants = @(
-    @{ name = "sanitized"; origin = ""; dest = Join-Path $repo "release\DGX-Chat-1.0.0.apk" }
+    @{ name = "sanitized"; origin = ""; dest = Join-Path $repo "release\DGX-Chat-$version.apk" }
 )
 if ($env:DGX_APK_LAN_ORIGIN) {
-    $variants += @{ name = "lan"; origin = $env:DGX_APK_LAN_ORIGIN; dest = Join-Path $repo "private\DGX-Chat-1.0.0-nas.apk" }
+    $variants += @{ name = "lan"; origin = $env:DGX_APK_LAN_ORIGIN; dest = Join-Path $repo "private\DGX-Chat-$version-nas.apk" }
 }
 if ($env:DGX_APK_DOMAIN_ORIGIN) {
-    $variants += @{ name = "domain"; origin = $env:DGX_APK_DOMAIN_ORIGIN; dest = Join-Path $repo "private\DGX-Chat-1.0.0-domain.apk" }
+    $variants += @{ name = "domain"; origin = $env:DGX_APK_DOMAIN_ORIGIN; dest = Join-Path $repo "private\DGX-Chat-$version-domain.apk" }
 }
 
 $results = @()

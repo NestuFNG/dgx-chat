@@ -88,7 +88,11 @@ export const createConfig = ({
       scriptLoading: 'defer',
       meta: { 'application-version': version },
     }),
-    new rspack.DefinePlugin({ __API_ORIGIN__: JSON.stringify(apiOrigin) }),
+    new rspack.DefinePlugin({
+      __API_ORIGIN__: JSON.stringify(apiOrigin),
+      // 客户端版本，与服务端 release/latest.json 的 latest.version 比较
+      __APP_VERSION__: JSON.stringify(version),
+    }),
     new rspack.CopyRspackPlugin({
       patterns: [
         { from: path.resolve(root, 'LICENSE'), to: 'LICENSE', toType: 'file' },

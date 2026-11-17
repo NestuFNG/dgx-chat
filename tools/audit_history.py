@@ -66,6 +66,10 @@ def scan_text_history(patterns):
         if kind == "regex":
             args.append("-E")
         args += [pattern] + revs + ["--"]
+        # Lockfiles legitimately carry third-party maintainer emails and URLs;
+        # scanning them produces noise, never a leak of ours.
+        if label == "email address":
+            args += [":(exclude)*lock*", ":(exclude)pnpm-lock.yaml"]
         res = run(args)
         hits = [h for h in res.stdout.splitlines() if h.strip()]
         if hits:

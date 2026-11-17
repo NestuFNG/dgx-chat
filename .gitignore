@@ -28,17 +28,6 @@ keystore.properties
 # Private operator notes (host names, admin password, invite codes).
 DEPLOY_INFO.md
 
-# =============================================================================
-# CI workflows
-#
-# GitHub rejects any push that adds files under .github/workflows unless the
-# personal access token has the `workflow` scope. If your token does not have
-# it, keep this rule: the files stay on disk and work locally, they are just
-# not published. Grant the scope (Settings -> Developer settings -> your token
-# -> Permissions -> Workflows: Read and write) and delete this rule to publish
-# them.
-# =============================================================================
-.github/workflows/
 
 # =============================================================================
 # Third-party / upstream reference clones (read-only, not ours to publish)

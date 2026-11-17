@@ -132,6 +132,26 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
+### Container image
+
+A self-contained image (backend **and** web client) is published to GitHub
+Packages on every release:
+
+```sh
+docker run -d --name dgx-chat -p 8439:8439 \
+  -v dgxchat-data:/data \
+  -e DGX_BASE_URL=http://your-gateway:8000/v1 \
+  ghcr.io/nestufng/dgx-chat:latest
+```
+
+Tags are `latest` and the release version (for example `1.0.2`). The image runs
+as uid 10001, keeps SQLite and uploads in the `/data` volume, and needs no bind
+mounts for the UI. Set the remaining options with `-e` — see
+[`server/.env.example`](server/.env.example) for the full list.
+
+> On a private repository the package inherits that visibility. Make the package
+> public from its package page if you want anyone to pull it anonymously.
+
 ### Point it at your endpoint
 
 Edit `.env`:

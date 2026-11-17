@@ -1,4 +1,5 @@
-ci: accept the Android SDK licences before installing packages
+docs: how to run the published container image
 
-sdkmanager prompts for licence acceptance, so on a fresh runner the install
-step failed before it could do anything.
+The self-contained image is built and pushed by the container workflow; document
+the one-line docker run, the available tags, and the visibility caveat for
+private repositories.

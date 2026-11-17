@@ -124,6 +124,12 @@ The script:
 
 It is safe to re-run: existing `.env` and data are never overwritten.
 
+**Upgrading.** `git pull` followed by the same command updates both halves: the
+script rebuilds the web UI whenever `app/` is newer than `web/`, and
+`docker compose up -d --build` rebuilds the image. Force a front-end rebuild with
+`./scripts/quickstart.sh --rebuild-web` (`-RebuildWeb` on Windows) if you ever
+suspect a stale bundle.
+
 Then open **http://localhost:8439/**, click *register* — **the first account
 becomes the administrator** — and go to `/admin` to create invite codes or more
 users.

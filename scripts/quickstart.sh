@@ -4,9 +4,12 @@
 #
 #   ./scripts/quickstart.sh              build + start, wait for health
 #   ./scripts/quickstart.sh --api-only   skip building the web UI
+#   ./scripts/quickstart.sh --rebuild-web  force a front-end rebuild (upgrades)
 #   ./scripts/quickstart.sh --status     show status and health, change nothing
 #
 # Safe to re-run: an existing .env and the data volume are never overwritten.
+# The web UI is rebuilt automatically when app/ sources are newer than web/,
+# so `git pull && ./scripts/quickstart.sh` upgrades both halves.
 # Requirements: docker + the docker compose plugin (and curl or wget to wait).
 # =============================================================================
 set -eu
@@ -19,11 +22,13 @@ ENV_FILE="server/.env"
 PORT=8439   # published port from server/docker-compose.yml
 API_ONLY=0
 STATUS_ONLY=0
+REBUILD_WEB=0
 
 for arg in "$@"; do
     case "$arg" in
         --api-only) API_ONLY=1 ;;
         --status) STATUS_ONLY=1 ;;
+        --rebuild-web) REBUILD_WEB=1 ;;
         -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "quickstart: unknown argument: $arg" >&2; exit 2 ;;
     esac
@@ -113,15 +118,32 @@ fi
 
 # --- 3. web UI ---------------------------------------------------------------
 if [ "$STATUS_ONLY" -eq 0 ]; then
-    if [ -f "web/index.html" ]; then
-        step "Web UI already present in web/"
-    elif [ -f "app/dist/index.html" ]; then
+    # Publish a fresh UI whenever the sources are newer than what is in web/, so
+    # that `git pull && ./scripts/quickstart.sh` upgrades the front end too
+    # instead of leaving a new backend talking to an old bundle.
+    NEED_BUILD=0
+    if [ -n "$REBUILD_WEB" ] && [ "$REBUILD_WEB" -eq 1 ]; then
+        NEED_BUILD=1
+    elif [ ! -f "web/index.html" ]; then
+        NEED_BUILD=1
+    elif [ -d "app/src" ] && [ -n "$(find app/src app/package.json app/rspack.config.ts \
+            -newer web/index.html -print -quit 2>/dev/null)" ]; then
+        NEED_BUILD=1
+    fi
+
+    if [ "$NEED_BUILD" -eq 0 ]; then
+        step "Web UI already up to date in web/"
+    elif [ -f "app/dist/index.html" ] && [ ! -n "$(find app/src -newer app/dist/index.html -print -quit 2>/dev/null)" ] && [ -n "$REBUILD_WEB" ] && [ "$REBUILD_WEB" -eq 0 ]; then
         step "Publishing app/dist into web/"
         mkdir -p web && cp -R app/dist/. web/
     elif [ "$API_ONLY" -eq 0 ]; then
         if command -v pnpm >/dev/null 2>&1; then
             step "Building the web UI (pnpm)"
             ( cd app && pnpm install --frozen-lockfile && pnpm build )
+            mkdir -p web && cp -R app/dist/. web/
+        elif [ -f "app/dist/index.html" ]; then
+            warn "pnpm is not available; publishing the existing app/dist instead.
+      Rebuild it elsewhere for the current source: cd app && pnpm install && pnpm build"
             mkdir -p web && cp -R app/dist/. web/
         else
             warn "no web/index.html, no app/dist and no pnpm — starting the API only.

@@ -217,19 +217,22 @@ def do_sync():
         print("packed %d web files (%.1f KB)" % (web_count, len(web_buf.getvalue()) / 1024.0))
     else:
         print("WARNING: app/dist missing - the browser UI will not be served")
-    client = nas_ssh.connect()
+    # Probe whether SFTP can reach the staging directory at all. Use a short-lived
+    # connection: the upload path below opens its own, so reusing this one after
+    # closing it (as an earlier version did) failed on SFTP-capable servers.
     stage = REMOTE_ROOT
+    sftp_ok = False
+    probe = nas_ssh.connect()
     try:
-        sftp_ok = False
         try:
-            sftp = client.open_sftp()
+            sftp = probe.open_sftp()
             sftp.listdir("/docker/dgxchat")
             sftp_ok = True
             sftp.close()
         except Exception:
             sftp_ok = False
     finally:
-        client.close()
+        probe.close()
 
     if not sftp_ok:
         # This NAS's SFTP is chrooted to a different volume, so stream the
@@ -260,8 +263,9 @@ def do_sync():
         republish_apk()
         return rc == 0
 
+    upload = nas_ssh.connect()
     try:
-        sftp = client.open_sftp()
+        sftp = upload.open_sftp()
         with sftp.file(stage + "/_upload_server.tar.gz", "wb") as fh:
             fh.write(buf.getvalue())
         if web_buf is not None:
@@ -272,7 +276,7 @@ def do_sync():
             fh.write(env_text.encode("utf-8"))
         sftp.close()
     finally:
-        client.close()
+        upload.close()
     script = (
         "set -e\n"
         "cd {root}\n"

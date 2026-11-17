@@ -12,12 +12,14 @@
 .EXAMPLE
   pwsh ./scripts/quickstart.ps1
   pwsh ./scripts/quickstart.ps1 -ApiOnly
+  pwsh ./scripts/quickstart.ps1 -RebuildWeb      # force a front-end rebuild
   pwsh ./scripts/quickstart.ps1 -Status
 #>
 [CmdletBinding()]
 param(
     [switch]$ApiOnly,
-    [switch]$Status
+    [switch]$Status,
+    [switch]$RebuildWeb
 )
 
 $ErrorActionPreference = "Stop"
@@ -111,12 +113,31 @@ if (-not $Status) {
 
 # --- 3. web UI ---------------------------------------------------------------
 if (-not $Status) {
-    if (Test-Path (Join-Path $WebDir "index.html")) {
-        Step "Web UI already present in web\"
-    } elseif (Test-Path (Join-Path $DistDir "index.html")) {
-        Step "Publishing app\dist into web\"
-        New-Item -ItemType Directory -Force -Path $WebDir | Out-Null
-        Copy-Item -Path (Join-Path $DistDir "*") -Destination $WebDir -Recurse -Force
+    # Rebuild when the sources are newer than what is already in web/, so that
+    # updating the checkout and re-running this script upgrades the front end as
+    # well instead of leaving a new backend next to an old bundle.
+    $needBuild = $false
+    if ($RebuildWeb) { $needBuild = $true }
+    elseif (-not (Test-Path (Join-Path $WebDir "index.html"))) { $needBuild = $true }
+    else {
+        $stamp = (Get-Item (Join-Path $WebDir "index.html")).LastWriteTime
+        $sources = @()
+        foreach ($p in @("app\src", "app\package.json", "app\rspack.config.ts")) {
+            $full = Join-Path $RepoDir $p
+            if (Test-Path $full) { $sources += Get-Item $full }
+        }
+        foreach ($s in $sources) {
+            if ($s.LastWriteTime -gt $stamp) { $needBuild = $true; break }
+            if ($s.PSIsContainer) {
+                $newer = Get-ChildItem $s.FullName -Recurse -File -ErrorAction SilentlyContinue |
+                         Where-Object { $_.LastWriteTime -gt $stamp } | Select-Object -First 1
+                if ($newer) { $needBuild = $true; break }
+            }
+        }
+    }
+
+    if (-not $needBuild) {
+        Step "Web UI already up to date in web\"
     } elseif (-not $ApiOnly -and (Get-Command pnpm -ErrorAction SilentlyContinue)) {
         Step "Building the web UI (pnpm)"
         Push-Location (Join-Path $RepoDir "app")
@@ -126,6 +147,10 @@ if (-not $Status) {
             pnpm build
             if ($LASTEXITCODE -ne 0) { throw "pnpm build failed" }
         } finally { Pop-Location }
+        New-Item -ItemType Directory -Force -Path $WebDir | Out-Null
+        Copy-Item -Path (Join-Path $DistDir "*") -Destination $WebDir -Recurse -Force
+    } elseif (Test-Path (Join-Path $DistDir "index.html")) {
+        Step "Publishing app\dist into web\"
         New-Item -ItemType Directory -Force -Path $WebDir | Out-Null
         Copy-Item -Path (Join-Path $DistDir "*") -Destination $WebDir -Recurse -Force
     } else {

@@ -107,6 +107,11 @@ pwsh ./scripts/quickstart.ps1
 
 **可以安全地重复执行**：已有的 `.env` 和数据不会被覆盖。
 
+**升级。** `git pull` 之后重新执行同一条命令即可同时更新前后端：脚本会在
+`app/` 比 `web/` 更新时自动重建网页版，`docker compose up -d --build` 会重建镜像。
+如果怀疑前端产物是旧的，用 `./scripts/quickstart.sh --rebuild-web`
+（Windows 上是 `-RebuildWeb`）强制重建。
+
 然后打开 **http://localhost:8439/**，点「注册」—— **第一个注册的账号自动成为管理员**
 —— 再进 `/admin` 创建邀请码或更多用户。
 

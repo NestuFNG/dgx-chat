@@ -11,12 +11,17 @@ never overwrite or read another user's row even with a guessed id.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, AsyncIterator, Iterable, Sequence
 
 import aiosqlite
+
+logger = logging.getLogger("dgxchat.db")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -187,6 +192,9 @@ class Database:
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
         self.conn: aiosqlite.Connection | None = None
+        #: Serialises explicit transactions inside this process.  Cross-process
+        #: safety comes from BEGIN IMMEDIATE itself (extra workers block).
+        self._write_lock = asyncio.Lock()
 
     # -- lifecycle ---------------------------------------------------------
     async def connect(self) -> None:
@@ -244,6 +252,34 @@ class Database:
 
     async def rollback(self) -> None:
         await self._c().rollback()
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator["Database"]:
+        """A real write transaction: ``BEGIN IMMEDIATE`` … ``COMMIT``/``ROLLBACK``.
+
+        Unlike :meth:`execute` (which auto-commits), nothing inside this block is
+        committed until it exits successfully.  ``BEGIN IMMEDIATE`` takes SQLite's
+        write lock up front, so the guarded decision (e.g. "is this the first
+        user?") cannot interleave with another process; the in-process
+        ``asyncio.Lock`` additionally prevents our own coroutines from
+        interleaving statements on the shared connection.
+
+        Multi-worker deployments: each worker holds its own lock, so correctness
+        relies on ``BEGIN IMMEDIATE`` blocking the other process (busy_timeout).
+        Do not replace it with a plain ``SELECT`` + later write.
+        """
+        conn = self._c()
+        async with self._write_lock:
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                yield self
+                await conn.commit()
+            except BaseException:
+                try:
+                    await conn.rollback()
+                except Exception:  # noqa: BLE001 - rollback must not mask the error
+                    logger.warning("rollback failed", exc_info=True)
+                raise
 
 
 def json_dumps(value: Any) -> str:

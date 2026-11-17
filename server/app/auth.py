@@ -351,61 +351,56 @@ async def register(payload: RegisterRequest, request: Request) -> LoginResponse:
     username = normalise_username(payload.username)
     validate_password(payload.password, settings)
 
-    # Serialise the "is this the first user" decision with an IMMEDIATE transaction.
-    await db.execute("BEGIN IMMEDIATE")
+    # The whole "first user?" decision + inserts run in one real transaction.
     try:
-        existing = await count_users(db)
-        if existing == 0:
-            # Bootstrap: the first account becomes admin and needs no invite.
-            role = "admin"
-        else:
-            mode = settings.registration_mode
-            if mode == "closed":
-                raise forbidden("注册暂未开放")
-            if mode == "invite":
-                code = (payload.invite_code or "").strip()
-                if settings.invite_code and code and hmac.compare_digest(
-                    code, settings.invite_code
-                ):
-                    pass  # legacy shared code from env
-                else:
-                    await consume_invite_locked(db, code)
-            role = "user"
+        async with db.transaction():
+            existing = await count_users(db)
+            if existing == 0:
+                # Bootstrap: the first account becomes admin and needs no invite.
+                role = "admin"
+            else:
+                mode = settings.registration_mode
+                if mode == "closed":
+                    raise forbidden("注册暂未开放")
+                if mode == "invite":
+                    code = (payload.invite_code or "").strip()
+                    if settings.invite_code and code and hmac.compare_digest(
+                        code, settings.invite_code
+                    ):
+                        pass  # legacy shared code from env
+                    else:
+                        await consume_invite_locked(db, code)
+                role = "user"
 
-        user_id = f"u_{secrets.token_hex(12)}"
-        stamp = now_ms()
-        await db.execute(
-            "INSERT INTO users (id, username, username_key, password_hash, role, disabled,"
-            " created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?)",
-            (
-                user_id,
-                username,
-                username.lower(),
-                hash_password(payload.password, n=settings.scrypt_n),
-                role,
-                stamp,
-                stamp,
-            ),
-            commit=False,
-        )
-        token = secrets.token_hex(32)
-        expires_at = (
-            stamp + settings.token_ttl_days * 86_400_000
-            if settings.token_ttl_days > 0
-            else None
-        )
-        await db.execute(
-            "INSERT INTO tokens (token_hash, user_id, created_at, revoked, label, expires_at)"
-            " VALUES (?, ?, ?, 0, 'register', ?)",
-            (token_hash(token), user_id, stamp, expires_at),
-            commit=False,
-        )
-        await db.commit()
-    except ApiError:
-        await db.rollback()
-        raise
+            user_id = f"u_{secrets.token_hex(12)}"
+            stamp = now_ms()
+            await db.execute(
+                "INSERT INTO users (id, username, username_key, password_hash, role, disabled,"
+                " created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?)",
+                (
+                    user_id,
+                    username,
+                    username.lower(),
+                    hash_password(payload.password, n=settings.scrypt_n),
+                    role,
+                    stamp,
+                    stamp,
+                ),
+                commit=False,
+            )
+            token = secrets.token_hex(32)
+            expires_at = (
+                stamp + settings.token_ttl_days * 86_400_000
+                if settings.token_ttl_days > 0
+                else None
+            )
+            await db.execute(
+                "INSERT INTO tokens (token_hash, user_id, created_at, revoked, label, expires_at)"
+                " VALUES (?, ?, ?, 0, 'register', ?)",
+                (token_hash(token), user_id, stamp, expires_at),
+                commit=False,
+            )
     except Exception as exc:
-        await db.rollback()
         if "UNIQUE" in str(exc).upper():
             raise ApiError(409, "用户名不可用", "conflict_error", param="username") from exc
         raise

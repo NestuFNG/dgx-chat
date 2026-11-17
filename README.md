@@ -1,5 +1,7 @@
 # DGX Chat
 
+[![CI](https://github.com/NestuFNG/dgx-chat/actions/workflows/ci.yml/badge.svg)](https://github.com/NestuFNG/dgx-chat/actions/workflows/ci.yml)
+
 **English** | [简体中文](README.zh-CN.md)
 
 **A self-hosted, multi-user chat UI for your own OpenAI-compatible model

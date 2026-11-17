@@ -123,3 +123,7 @@ private/
 *.jks-*
 android/keystore/
 
+
+# Private secret-scan targets for tools/audit_history.py
+tools/audit_patterns.local.txt
+

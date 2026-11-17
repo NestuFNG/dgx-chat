@@ -40,15 +40,23 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android platform and build tools
+      - name: Prepare the Android SDK
+        # The runner image already ships an SDK. android-actions/setup-android
+        # currently breaks on the Ubuntu 26.04 image (it runs `sdkmanager tools`,
+        # which no longer exists), so configure the preinstalled one instead.
         run: |
-          # Licences must be accepted before installing, otherwise sdkmanager
-          # waits for input on a fresh runner and the step fails.
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          set -eu
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          if [ ! -d "$SDK" ]; then echo "no Android SDK found"; exit 1; fi
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          SM_DIR="$(ls -d "$SDK"/cmdline-tools/*/bin 2>/dev/null | head -n 1)"
+          if [ -z "$SM_DIR" ]; then echo "sdkmanager not found under $SDK"; exit 1; fi
+          echo "$SM_DIR" >> "$GITHUB_PATH"
+          echo "$SDK/platform-tools" >> "$GITHUB_PATH"
+          yes | "$SM_DIR/sdkmanager" --licenses > /dev/null || true
+          "$SM_DIR/sdkmanager" --install "platform-tools" "platforms;android-35" "build-tools;35.0.0" > /dev/null
+          echo "SDK ready at $SDK"
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4

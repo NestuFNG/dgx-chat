@@ -117,3 +117,9 @@ Thumbs.db
 # Locally built APKs that embed this deployment's address (never published).
 private/
 
+
+# Signing material: never publish, and never let a *.jks.<timestamp> backup slip through.
+*.jks.*
+*.jks-*
+android/keystore/
+

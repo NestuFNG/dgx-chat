@@ -122,7 +122,7 @@ if (-not $Status) {
     else {
         $stamp = (Get-Item (Join-Path $WebDir "index.html")).LastWriteTime
         $sources = @()
-        foreach ($p in @("app\src", "app\package.json", "app\rspack.config.ts")) {
+        foreach ($p in @("app\src", "app\package.json", "app\rspack.config.ts", "app\pnpm-lock.yaml")) {
             $full = Join-Path $RepoDir $p
             if (Test-Path $full) { $sources += Get-Item $full }
         }

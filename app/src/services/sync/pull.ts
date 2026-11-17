@@ -130,7 +130,11 @@ export type SessionSyncApplied = {
 
 /**
  * 应用一次增量同步：先删墓碑、再合并列表、最后推进游标。
- * 首次运行没有游标时忽略 deleted（避免把「服务器还没见过的本地会话」误删）。
+ * 墓碑总是应用，即使这是首次同步（没有游标）。
+ *
+ * 为什么首次也安全：服务器只会为它**实际存在过的**会话留墓碑，而此类会话的 id
+ * 一定来自某台客户端推送。所以墓碑不可能命中「只在本机创建、服务器从未见过」的
+ * 会话；忽略它们反而会让升级后的旧设备永远收不到那次删除通知。
  * 账号切换后返回 null，且不再执行任何写入。
  */
 export const applySessionSync = async (
@@ -143,8 +147,7 @@ export const applySessionSync = async (
     return null
   }
   const parsed = parseSessionSyncResponse(raw)
-  const full = cursor === null
-  const deleted = full ? [] : parsed.deleted
+  const deleted = parsed.deleted
   // 同一响应里既出现在列表又出现在墓碑中的 id，以墓碑为准，避免合并时又把摘要写回来
   const deletedIds = new Set(deleted)
   const sessions = parsed.sessions.filter((item) => !deletedIds.has(item.id))
@@ -178,7 +181,7 @@ export const applySessionSync = async (
     }
   }
 
-  return { sessions, deleted, cursor: parsed.cursor, full }
+  return { sessions, deleted, cursor: parsed.cursor, full: cursor === null }
 }
 
 // ---------------------------------------------------------------------------

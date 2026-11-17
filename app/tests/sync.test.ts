@@ -224,7 +224,20 @@ const makeSyncDeps = (response: unknown, initialCursor: string | null) => {
   return { state, deps }
 }
 
-test('首次同步（无游标）忽略删除墓碑并记录 serverTime', async () => {
+test('同一账号换 token 后，旧守卫失效（旧 401 不应踢掉新登录）', () => {
+  // scope 只认 user id，所以登出再登入同一账号时 scope 不变；把凭证也纳入比较
+  // 才能让旧 token 的在途请求作废。
+  setAccount('same-user', 'old-token')
+  const guard = createScopeGuard()
+  assert.equal(guard.isCurrent(), true)
+
+  storage.setItem('dgxchat:token', 'new-token') // 同一账号换了新凭证
+  assert.equal(guard.isCurrent(), false, '换 token 之后旧守卫必须失效')
+})
+
+test('首次同步（无游标）也应用删除墓碑，并记录 serverTime', async () => {
+  // 服务器只为它实际存在过的会话留墓碑，所以首次同步应用它们是安全的；
+  // 忽略它们会让升级后的旧设备永远收不到那次删除通知。
   setAccount('cursor1', 'token-a')
   const { state, deps } = makeSyncDeps(
     { sessions: [summary('keep')], deleted: ['gone'], since: '0', serverTime: '100' },
@@ -233,10 +246,12 @@ test('首次同步（无游标）忽略删除墓碑并记录 serverTime', async 
   const applied = await pull.applySessionSync(deps, createScopeGuard())
   assert.ok(applied)
   assert.equal(applied.full, true)
-  assert.deepEqual(applied.deleted, [])
-  assert.deepEqual(state.deleted, [], '首次运行不能消费 deleted')
-  assert.deepEqual(state.merged, ['keep'])
+  assert.deepEqual(applied.deleted, ['gone'], '首次同步也要消费 deleted')
+  assert.deepEqual(state.cancelled, ['gone'], '墓碑要先取消待推送')
+  assert.deepEqual(state.deleted, ['gone'], '本地副本必须删掉')
+  assert.deepEqual(state.merged, ['keep'], '墓碑中的 id 不能从列表合并回来')
   assert.equal(state.cursor, '100')
+  assert.deepEqual(state.cancelled, ['gone'], '墓碑只清本地，不产生出站 DELETE')
 })
 
 test('增量同步的游标取 serverTime，忽略回显的 since', async () => {

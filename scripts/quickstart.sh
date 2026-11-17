@@ -126,7 +126,7 @@ if [ "$STATUS_ONLY" -eq 0 ]; then
         NEED_BUILD=1
     elif [ ! -f "web/index.html" ]; then
         NEED_BUILD=1
-    elif [ -d "app/src" ] && [ -n "$(find app/src app/package.json app/rspack.config.ts \
+    elif [ -d "app/src" ] && [ -n "$(find app/src app/package.json app/rspack.config.ts app/pnpm-lock.yaml \
             -newer web/index.html -print -quit 2>/dev/null)" ]; then
         NEED_BUILD=1
     fi

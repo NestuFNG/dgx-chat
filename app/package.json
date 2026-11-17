@@ -1,6 +1,6 @@
 {
   "name": "dgx-chat",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "DGX Chat：自建多端聊天前端（基于 deepseek-ai/chat-demo，MIT）。",
   "license": "MIT",
   "private": true,

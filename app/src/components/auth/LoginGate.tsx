@@ -30,8 +30,12 @@ export const LoginGate = () => {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  /** 校验并保存服务器地址；返回是否有效 */
+  /** 校验并保存服务器地址；返回是否有效。分发包没有默认地址时必须显式填写 */
   const saveOrigin = (): boolean => {
+    if (!origin.trim()) {
+      setOriginError(t('serverAddressMissing'))
+      return false
+    }
     if (normalizeOrigin(origin) === null) {
       setOriginError(t('serverAddressInvalid'))
       return false
@@ -43,9 +47,12 @@ export const LoginGate = () => {
 
   const describe = (cause: unknown, kind: 'login' | 'register'): string => {
     if (isNetworkError(cause)) {
-      return t('serverNetworkError', {
-        message: cause instanceof Error ? cause.message : String(cause),
-      })
+      const message = cause instanceof Error ? cause.message : String(cause)
+      // 未配置服务器地址时直接展示原因，而不是笼统的「无法连接服务器」
+      if (message === t('serverAddressRequired')) {
+        return message
+      }
+      return t('serverNetworkError', { message })
     }
     if (cause instanceof HttpError) {
       if (cause.status === 429) {
@@ -106,11 +113,16 @@ export const LoginGate = () => {
               autoComplete="url"
               value={origin}
               placeholder={t('serverAddressPlaceholder')}
-              onChange={(event) => setOrigin(event.target.value)}
+              onChange={(event) => {
+                setOrigin(event.target.value)
+                setOriginError(null)
+              }}
               onBlur={() => {
-                if (origin !== getApiOrigin()) {
-                  saveOrigin()
+                // 空值只在提交 / 直连时提示必填，避免用户还没输入就看到报错
+                if (!origin.trim() || origin === getApiOrigin()) {
+                  return
                 }
+                saveOrigin()
               }}
             />
             {originError ? (

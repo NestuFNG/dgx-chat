@@ -31,10 +31,13 @@ with `NODE_ENV=production`; it works in PowerShell, cmd, bash and zsh alike.
 
 The API origin is resolved on **every request**, so changing it takes effect immediately:
 
-1. `localStorage['dgxchat:origin']` — set from the login screen or Settings → 服务器 / Account.
+1. `localStorage['dgxchat:origin']` — set from the login screen or Settings → Server / Account.
 2. Otherwise the build-time default `__API_ORIGIN__`, injected by `rspack.config.ts`.
-   It defaults to `http://localhost:8439`; override it at build time with the
-   `DGX_API_ORIGIN` environment variable.
+   **Distributed builds ship no default: this is empty unless the builder sets
+   `DGX_API_ORIGIN`.** Self-hosters can bake their own address in:
+   `DGX_API_ORIGIN=http://their-host:8439 pnpm build`. With no stored and no baked
+   address, the login screen requires the user to enter one and API calls fail with
+   "Set the server address first" instead of falling back to any host.
 
 ## Accounts and cloud sync
 

@@ -31,8 +31,10 @@ pnpm type       # TypeScript 类型检查
 API 根地址在**每次请求时**重新解析，设置后立即生效：
 
 1. `localStorage['dgxchat:origin']` —— 由登录页或「设置 → 服务器 / 账号」写入；
-2. 否则使用构建期默认值 `__API_ORIGIN__`（见 `rspack.config.ts`，默认
-   `http://localhost:8439`，可用环境变量 `DGX_API_ORIGIN` 在构建时覆盖）。
+2. 否则使用构建期默认值 `__API_ORIGIN__`（见 `rspack.config.ts`）。**分发包默认不内置地址，
+   为空字符串**；自托管者可用 `DGX_API_ORIGIN=http://their-host:8439 pnpm build` 把自己的地址
+   烧进包里。既没有保存值、构建时也没指定地址时，登录页会要求用户显式填写，API 调用会以
+   「请先在设置里填写服务器地址」失败，而不会回退到任何主机。
 
 ## 账号与云同步
 

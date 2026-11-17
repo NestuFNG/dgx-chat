@@ -55,6 +55,10 @@ export const ServerSettings = () => {
   }, [token])
 
   const saveOrigin = () => {
+    if (!origin.trim()) {
+      setOriginError(t('serverAddressMissing'))
+      return
+    }
     if (normalizeOrigin(origin) === null) {
       setOriginError(t('serverAddressInvalid'))
       return
@@ -64,6 +68,17 @@ export const ServerSettings = () => {
     setOriginError(null)
     setOriginSaved(true)
     if (useAuth.getState().token) {
+      void checkConnection()
+    }
+  }
+
+  /** 恢复构建期默认地址；构建时没有默认值时清空输入框，而不是伪造一个地址 */
+  const resetOrigin = () => {
+    const restored = setApiOrigin(null)
+    setOrigin(restored)
+    setOriginError(null)
+    setOriginSaved(false)
+    if (restored && useAuth.getState().token) {
       void checkConnection()
     }
   }
@@ -100,9 +115,11 @@ export const ServerSettings = () => {
   /** 后端错误分类：限流 / 邀请码（403）/ 账号密码错误单独给出可读文案 */
   const describeAuthError = (cause: unknown, kind: 'login' | 'register'): string => {
     if (isNetworkError(cause)) {
-      return t('serverNetworkError', {
-        message: cause instanceof Error ? cause.message : String(cause),
-      })
+      const message = cause instanceof Error ? cause.message : String(cause)
+      if (message === t('serverAddressRequired')) {
+        return message
+      }
+      return t('serverNetworkError', { message })
     }
     if (cause instanceof HttpError) {
       if (cause.status === 429) {
@@ -178,6 +195,9 @@ export const ServerSettings = () => {
               }
             }}
           />
+          <button type="button" className={styles.link} onClick={resetOrigin}>
+            {t('serverAddressReset')}
+          </button>
           {originError ? (
             <div className={settingsStyles.error} role="alert">
               {originError}

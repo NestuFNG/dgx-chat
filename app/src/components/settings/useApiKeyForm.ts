@@ -17,7 +17,9 @@ export const useApiKeyForm = (onSaved?: () => void) => {
       : classifyApiError(cause) === 'unauthorized'
         ? t('apiKeyInvalid')
         : classifyApiError(cause) === 'network'
-          ? t('commonNetworkErrorToast')
+          ? cause instanceof ApiError && cause.localMessage?.key === 'serverAddressRequired'
+            ? t('serverAddressRequired')
+            : t('commonNetworkErrorToast')
           : t('apiKeyVerificationFailed', {
               message:
                 cause instanceof ApiError && cause.localMessage

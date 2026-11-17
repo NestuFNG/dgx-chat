@@ -10,11 +10,6 @@ import type {
   MessageStreamEvent,
 } from './types.js'
 
-/**
- * Anthropic 兼容接口的前缀。
- * 每次请求时按当前设置拼接（运行期 origin 可在设置面板修改），不能缓存成模块常量。
- */
-const anthropicBaseUrl = () => `${getApiOrigin()}/anthropic/v1`
 /** 引用 Files API 上传的图片、调用 Anthropic 兼容 Files API 时必须携带 */
 const FILES_BETA = 'files-api-2025-04-14'
 
@@ -44,8 +39,25 @@ export class ApiError extends Error {
   }
 }
 
-const isErrorBody = (value: unknown): value is ApiErrorBody =>
-  typeof value === 'object' &&
+/**
+ * 运行期 origin。分发包可以不带默认地址，此时必须显式报错，
+ * 绝不拼接相对 URL（否则请求会静默打到 WebView 自身的 origin）。
+ */
+const apiOrigin = (): string => {
+  const origin = getApiOrigin()
+  if (!origin) {
+    throw new ApiError('network', { key: 'serverAddressRequired' })
+  }
+  return origin
+}
+
+/**
+ * Anthropic 兼容接口的前缀。
+ * 每次请求时按当前设置拼接（运行期 origin 可在设置面板修改），不能缓存成模块常量。
+ */
+const anthropicBaseUrl = () => `${apiOrigin()}/anthropic/v1`
+
+const isErrorBody = (value: unknown): value is ApiErrorBody =>  typeof value === 'object' &&
   value !== null &&
   'error' in value &&
   typeof (value as ApiErrorBody).error?.message === 'string'
@@ -93,7 +105,7 @@ const anthropicHeaders = (apiKey: string, beta: boolean): Record<string, string>
 
 /** 用 GET /models 校验 API Key（不产生费用） */
 export const verifyApiKey = async (apiKey: string, signal?: AbortSignal): Promise<void> => {
-  await request(`${getApiOrigin()}/models`, {
+  await request(`${apiOrigin()}/models`, {
     method: 'GET',
     headers: { Authorization: `Bearer ${apiKey}` },
     signal,

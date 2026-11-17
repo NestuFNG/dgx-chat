@@ -29,7 +29,13 @@ export const describeReply = (reply: AssistantMessage): Notice | null => {
       return { text: message || translate('uploadFileStatusFailed') }
     }
     if (kind === 'network') {
-      return { text: translate('commonNetworkErrorToast') }
+      // 未配置服务器地址是要用户处理的问题，不能折叠成通用网络错误
+      return {
+        text:
+          localMessage?.key === 'serverAddressRequired'
+            ? message
+            : translate('commonNetworkErrorToast'),
+      }
     }
     switch (classifyStatus(status)) {
       case 'unauthorized':

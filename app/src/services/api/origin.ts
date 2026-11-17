@@ -34,8 +34,14 @@ export const normalizeOrigin = (value: string): string | null => {
   return `${url.origin}${path}`
 }
 
-/** 构建期默认地址；构建配置里默认注入 http://localhost:8439 */
-const BUILD_ORIGIN = normalizeOrigin(__API_ORIGIN__) ?? 'http://localhost:8439'
+/**
+ * 构建期默认地址。分发包默认不内置任何服务器地址，此时为空字符串；
+ * 自托管构建可以用 DGX_API_ORIGIN 把地址烧进来。这里不再有任何硬编码回退主机。
+ */
+const BUILD_ORIGIN = normalizeOrigin(__API_ORIGIN__) ?? ''
+
+/** 构建期默认地址（可能为空），供设置面板的「恢复默认」使用 */
+export const getBuildApiOrigin = (): string => BUILD_ORIGIN
 
 const readStoredOrigin = (): string | null => {
   try {
@@ -45,13 +51,20 @@ const readStoredOrigin = (): string | null => {
   }
 }
 
-/** 当前生效的 API 根地址；每次调用都重新读取，设置面板改完立即对后续请求生效 */
+/**
+ * 当前生效的 API 根地址，可能为空字符串。
+ * 为空时调用方必须显式报错（见 client.ts / speech.ts / http.ts），
+ * 绝不能拼成相对 URL 去请求 WebView 自身的 origin。
+ */
 export const getApiOrigin = (): string => {
   const stored = readStoredOrigin()
   return (stored ? normalizeOrigin(stored) : null) ?? BUILD_ORIGIN
 }
 
-/** 保存服务器地址；传 null 恢复构建期默认值，返回保存后的生效地址 */
+/** 是否已经配置了可用的服务器地址；为空时 UI 必须先要求用户填写 */
+export const hasApiOrigin = (): boolean => getApiOrigin() !== ''
+
+/** 保存服务器地址；传 null 恢复构建期默认值（可能为空），返回恢复后的地址 */
 export const setApiOrigin = (value: string | null): string => {
   const normalized = value === null ? null : normalizeOrigin(value)
   try {

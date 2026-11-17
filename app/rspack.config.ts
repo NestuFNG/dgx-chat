@@ -17,14 +17,19 @@ const cssLoader = {
 }
 
 type ConfigOptions = {
-  /** 构建期默认的 API 地址，注入为 __API_ORIGIN__；运行时仍可在设置里覆盖 */
+  /** 构建期默认的 API 地址，注入为 __API_ORIGIN__；为空表示不内置默认值，运行时由用户填写 */
   apiOrigin?: string
   /** 开发服务器配置，支持本地接口代理 */
   devServer?: Configuration['devServer']
 }
 
-/** 构建期默认的 API 地址；用 DGX_API_ORIGIN 环境变量在构建时覆盖（换成域名时无需改源码） */
-const defaultApiOrigin = process.env.DGX_API_ORIGIN || 'http://localhost:8439'
+/**
+ * 构建期默认的 API 地址：默认空字符串 —— 分发包不内置可用的服务器地址，
+ * 由用户在登录页 / 设置里显式填写。自托管者可以在构建时把自己的地址烧进去：
+ *   DGX_API_ORIGIN=http://their-host:8439 pnpm build
+ * 客户端设置里保存的 localStorage['dgxchat:origin'] 始终优先。
+ */
+const defaultApiOrigin = process.env.DGX_API_ORIGIN || ''
 
 /** 创建构建配置，支持自定义 API 地址和开发服务器选项 */
 export const createConfig = ({

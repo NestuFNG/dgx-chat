@@ -1,3 +1,4 @@
+import { translate } from '../../i18n/index.js'
 import { getApiOrigin } from './origin.js'
 
 /**
@@ -40,14 +41,25 @@ export const readErrorMessage = async (response: Response): Promise<string> => {
   return text
 }
 
-/** 拼接完整 URL；path 以 / 开头 */
-export const apiUrl = (path: string): string => `${getApiOrigin()}${path}`
+/** 拼接完整 URL；origin 未配置时抛出可读错误，绝不返回相对路径 */
+export const apiUrl = (path: string): string => {
+  const origin = getApiOrigin()
+  if (!origin) {
+    throw new HttpError(undefined, translate('serverAddressRequired'), 'network')
+  }
+  return `${origin}${path}`
+}
 
 export const bearer = (token: string): Record<string, string> => ({
   Authorization: `Bearer ${token}`,
 })
 
 export const fetchApi = async (path: string, init: RequestInit = {}): Promise<Response> => {
+  // 分发包可能没有默认服务器地址：为空时显式报错，避免打到 WebView 自身的相对地址
+  const origin = getApiOrigin()
+  if (!origin) {
+    throw new HttpError(undefined, translate('serverAddressRequired'), 'network')
+  }
   // 自建 NAS 不可达时浏览器可能挂很久，统一 15 秒超时；调用方自己的 signal 仍然有效
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
@@ -55,7 +67,7 @@ export const fetchApi = async (path: string, init: RequestInit = {}): Promise<Re
   init.signal?.addEventListener('abort', forwardAbort)
   let response: Response
   try {
-    response = await fetch(apiUrl(path), { ...init, signal: controller.signal })
+    response = await fetch(`${origin}${path}`, { ...init, signal: controller.signal })
   } catch (error) {
     if (init.signal?.aborted) {
       throw error

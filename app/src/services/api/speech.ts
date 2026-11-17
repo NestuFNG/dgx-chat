@@ -6,9 +6,16 @@ import { getApiOrigin } from './origin.js'
  * - ASR：POST /v1/tools/asr，multipart 上传 WAV / Ogg Opus，一次返回全文
  * - TTS：POST /v1/tools/tts，返回音频字节流（产出首帧后即返回 200）
  * 鉴权都用 Authorization: Bearer。
- * 地址按运行期 origin 每次请求拼接（设置面板可改服务器地址）。
+ * 地址按运行期 origin 每次请求拼接（设置面板可改服务器地址）；
+ * 分发包可能没有默认地址，为空时显式报错而不是退回相对 URL。
  */
-const toolsBaseUrl = () => `${getApiOrigin()}/v1/tools`
+const toolsBaseUrl = () => {
+  const origin = getApiOrigin()
+  if (!origin) {
+    throw new ApiError('network', { key: 'serverAddressRequired' })
+  }
+  return `${origin}/v1/tools`
+}
 
 export type TtsVoice = 'stella' | 'tide'
 

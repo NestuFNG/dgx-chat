@@ -176,6 +176,7 @@ export const zh = {
   serverAddressRequired: '请先在设置里填写服务器地址',
   serverAddressMissing: '请填写服务器地址',
   serverAddressReset: '恢复默认',
+  serverAddressSameOriginHint: '已使用当前页面地址',
   serverAddressSaved: '服务器地址已保存',
   serverToken: 'API Key / Token',
   serverTokenDescription: '登录后自动使用账号 Token；也可手动粘贴。留空时使用「数据管理」里的 API Key 直连模式。',

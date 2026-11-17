@@ -162,6 +162,30 @@ def ensure_remote_dirs():
     return rc == 0
 
 
+def republish_apk():
+    """Put release/*.apk back into the web root after it was wiped.
+
+    The web directory is replaced wholesale on every sync, which would silently
+    break the download link at /release/. Re-upload any published APKs.
+    """
+    rel_dir = os.path.join(HERE, "..", "release")
+    if not os.path.isdir(rel_dir):
+        return
+    apks = [f for f in os.listdir(rel_dir) if f.endswith((".apk", ".sha256"))]
+    if not apks:
+        return
+    nas_ssh.run("mkdir -p %s/release" % REMOTE_WEB)
+    for name in apks:
+        path = os.path.join(rel_dir, name)
+        with open(path, "rb") as fh:
+            data = fh.read()
+        if data:
+            nas_ssh.exec_stdin("cat > %s/release/%s" % (REMOTE_WEB, name), data)
+    rc, out, err = nas_ssh.run("ls -l %s/release" % REMOTE_WEB)
+    print("re-published APK(s):")
+    print(out)
+
+
 def do_sync():
     env = load_env()
     if not ensure_remote_dirs():
@@ -214,6 +238,7 @@ def do_sync():
         print(out)
         if err.strip():
             print("stderr:", err[:800])
+        republish_apk()
         return rc == 0
 
     try:
@@ -244,6 +269,7 @@ def do_sync():
     print(out)
     if err.strip():
         print("stderr:", err[:2000])
+    republish_apk()
     return rc == 0
 
 

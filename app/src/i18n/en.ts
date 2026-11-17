@@ -185,6 +185,7 @@ export const en = {
   serverAddressRequired: 'Set the server address first',
   serverAddressMissing: 'Enter the server address',
   serverAddressReset: 'Use default',
+  serverAddressSameOriginHint: 'Using this page’s address',
   serverAddressSaved: 'Server address saved',
   serverToken: 'API Key / Token',
   serverTokenDescription: 'The account Token is used automatically after login; you may also paste one. When empty, the API Key below is used in direct mode.',

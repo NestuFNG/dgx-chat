@@ -2,7 +2,12 @@ import clsx from 'clsx'
 import { useEffect, useState, type KeyboardEvent } from 'react'
 import { useTranslate } from '../../i18n/index.js'
 import { HttpError } from '../../services/api/http.js'
-import { getApiOrigin, normalizeOrigin, setApiOrigin } from '../../services/api/origin.js'
+import {
+  getApiOrigin,
+  isSameOriginDefault,
+  normalizeOrigin,
+  setApiOrigin,
+} from '../../services/api/origin.js'
 import {
   adoptToken,
   checkConnection,
@@ -34,6 +39,8 @@ export const ServerSettings = () => {
   const [origin, setOrigin] = useState(() => getApiOrigin())
   const [originError, setOriginError] = useState<string | null>(null)
   const [originSaved, setOriginSaved] = useState(false)
+  // Web 部署时默认使用当前页面地址；原生壳内没有这个回退
+  const [sameOriginDefault, setSameOriginDefault] = useState(() => isSameOriginDefault())
 
   const [editingToken, setEditingToken] = useState(false)
   const [tokenValue, setTokenValue] = useState('')
@@ -67,17 +74,19 @@ export const ServerSettings = () => {
     setOrigin(saved)
     setOriginError(null)
     setOriginSaved(true)
+    setSameOriginDefault(isSameOriginDefault())
     if (useAuth.getState().token) {
       void checkConnection()
     }
   }
 
-  /** 恢复构建期默认地址；构建时没有默认值时清空输入框，而不是伪造一个地址 */
+  /** 恢复默认值：构建期地址 → 浏览器同源 → 空（原生壳内为空），绝不伪造地址 */
   const resetOrigin = () => {
     const restored = setApiOrigin(null)
     setOrigin(restored)
     setOriginError(null)
     setOriginSaved(false)
+    setSameOriginDefault(isSameOriginDefault())
     if (restored && useAuth.getState().token) {
       void checkConnection()
     }
@@ -175,6 +184,9 @@ export const ServerSettings = () => {
       <div className={clsx(settingsStyles.cell, styles.block)}>
         <div className={settingsStyles.label}>{t('serverAddress')}</div>
         <div className={settingsStyles.description}>{t('serverAddressDescription')}</div>
+        {sameOriginDefault ? (
+          <div className={settingsStyles.description}>{t('serverAddressSameOriginHint')}</div>
+        ) : null}
         <div className={styles.inline}>
           <input
             className={clsx(styles.input, originError && styles.inputError)}

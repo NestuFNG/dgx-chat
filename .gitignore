@@ -82,7 +82,6 @@ server/web/
 *.sqlite
 *.sqlite3
 *.log
-!.github/**
 server/.tmpchg/
 server/.tmpchg.*
 tools/*.sse
@@ -114,3 +113,7 @@ Thumbs.db
 .vscode/
 *.swp
 *~
+
+# Locally built APKs that embed this deployment's address (never published).
+private/
+

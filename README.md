@@ -210,9 +210,21 @@ A prebuilt, signed APK is committed at
 (sha256 in [`release/DGX-Chat-1.0.0.apk.sha256`](release/DGX-Chat-1.0.0.apk.sha256)).
 
 Copy it to the phone, allow installing from unknown sources, open it and enter
-**your** server address (`http://<host>:8439`) on the login screen. No personal
-address is baked into the build — the default is `http://localhost:8439`, so the
-first field you fill in is the only configuration needed.
+**your** server address (`http://<host>:8439`) on the login screen, then sign in.
+The APK ships with **no** server address — the field is empty and required, so it
+cannot silently point at somebody else's machine. The address is kept on the
+device and can be changed any time under Settings → Server / Account, so one APK
+works against every deployment.
+
+(In the browser build this is automatic: opened from the server itself, the app
+uses the address of the page you are already on.)
+
+If your phones cannot reach an SMB share, serve the APK from the backend
+instead: drop it in the `web/release/` directory next to the container and it is
+downloadable at `http://<host>:8439/release/<file>.apk`, which any mobile
+browser can open. `python tools/publish_apk.py` does this for you (it also
+copies the APK to a share folder), and `deploy/deploy.py` re-publishes it after
+every sync.
 
 Requirements: Android 7.0 (API 24) or newer. The app is signed with a project
 key; installing over a build signed by a different key requires uninstalling

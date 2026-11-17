@@ -1,7 +1,12 @@
 import { useState, type FormEvent } from 'react'
 import { useTranslate } from '../../i18n/index.js'
 import { HttpError } from '../../services/api/http.js'
-import { getApiOrigin, normalizeOrigin, setApiOrigin } from '../../services/api/origin.js'
+import {
+  getApiOrigin,
+  isSameOriginDefault,
+  normalizeOrigin,
+  setApiOrigin,
+} from '../../services/api/origin.js'
 import {
   isNetworkError,
   login,
@@ -23,6 +28,8 @@ export const LoginGate = () => {
   const status = useAuth((state) => state.status)
   const [mode, setMode] = useState<'login' | 'register'>('login')
   const [origin, setOrigin] = useState(() => getApiOrigin())
+  // Web 部署时默认使用当前页面地址；原生壳内没有这个回退
+  const [sameOriginDefault] = useState(() => isSameOriginDefault())
   const [originError, setOriginError] = useState<string | null>(null)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -130,7 +137,11 @@ export const LoginGate = () => {
                 {originError}
               </span>
             ) : (
-              <span className={styles.fieldHint}>{t('serverAddressDescription')}</span>
+              <span className={styles.fieldHint}>
+                {sameOriginDefault && origin === getApiOrigin()
+                  ? t('serverAddressSameOriginHint')
+                  : t('serverAddressDescription')}
+              </span>
             )}
           </label>
 

@@ -32,11 +32,12 @@ with `NODE_ENV=production`; it works in PowerShell, cmd, bash and zsh alike.
 The API origin is resolved on **every request**, so changing it takes effect immediately:
 
 1. `localStorage['dgxchat:origin']` — set from the login screen or Settings → Server / Account.
-2. Otherwise the build-time default `__API_ORIGIN__`, injected by `rspack.config.ts`.
-   **Distributed builds ship no default: this is empty unless the builder sets
-   `DGX_API_ORIGIN`.** Self-hosters can bake their own address in:
-   `DGX_API_ORIGIN=http://their-host:8439 pnpm build`. With no stored and no baked
-   address, the login screen requires the user to enter one and API calls fail with
+2. Otherwise the default: the build-time address from `DGX_API_ORIGIN` when the builder set one,
+   else — **in a browser only** — the page's own origin when the bundle is served over http(s)
+   by the backend itself, else empty. The Capacitor app never falls back to the page origin, so
+   distributed native builds still require the user to enter the address.
+   Self-hosters can bake their own address in: `DGX_API_ORIGIN=http://their-host:8439 pnpm build`.
+   With no stored, no baked and no browser same-origin address, API calls fail with
    "Set the server address first" instead of falling back to any host.
 
 ## Accounts and cloud sync

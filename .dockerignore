@@ -1,0 +1,18 @@
+# Keep the build context small: the web client is built inside the image.
+.git
+node_modules
+**/node_modules
+dist
+**/dist
+build
+**/build
+.venv
+**/.venv
+__pycache__
+**/__pycache__
+.pytest_cache
+data
+private
+toolchain
+*.apk
+*.log

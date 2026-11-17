@@ -203,7 +203,22 @@ Complete reference: [`server/.env.example`](server/.env.example).
 
 Found a security issue? See [SECURITY.md](SECURITY.md).
 
-## Build the Android APK
+## Install the Android app
+
+A prebuilt, signed APK is committed at
+[`release/DGX-Chat-1.0.0.apk`](release/DGX-Chat-1.0.0.apk)
+(sha256 in [`release/DGX-Chat-1.0.0.apk.sha256`](release/DGX-Chat-1.0.0.apk.sha256)).
+
+Copy it to the phone, allow installing from unknown sources, open it and enter
+**your** server address (`http://<host>:8439`) on the login screen. No personal
+address is baked into the build — the default is `http://localhost:8439`, so the
+first field you fill in is the only configuration needed.
+
+Requirements: Android 7.0 (API 24) or newer. The app is signed with a project
+key; installing over a build signed by a different key requires uninstalling
+first.
+
+## Build the Android APK yourself
 
 Prerequisites: JDK 17, Android SDK 35, Node 20+, pnpm.
 
@@ -211,6 +226,8 @@ Prerequisites: JDK 17, Android SDK 35, Node 20+, pnpm.
 cd app
 pnpm install
 pnpm build                   # produces app/dist
+                             # optional: DGX_API_ORIGIN=http://your-host:8439 pnpm build
+                             #           to pre-fill the server address
 
 cd ../android
 pnpm install

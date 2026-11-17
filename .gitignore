@@ -47,6 +47,7 @@ android/android/app/build/
 android/android/capacitor-cordova-android-plugins/build/
 android/android/local.properties
 *.apk
+!release/*.apk
 *.aab
 *.ap_
 *.dex

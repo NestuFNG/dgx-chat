@@ -52,6 +52,53 @@ def now_rfc3339() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _now_local() -> datetime:
+    """Server-local, timezone-aware clock (tests monkeypatch this)."""
+    return datetime.now().astimezone()
+
+
+def format_utc_offset(moment: datetime) -> str:
+    offset = moment.strftime("%z")
+    if not offset:
+        return "UTC"
+    return f"UTC{offset[:3]}:{offset[3:]}"
+
+
+def retrieval_time_context(now: datetime | None = None) -> str:
+    """Temporal context for retrieval requests.
+
+    Without this the official model guesses "now" and searches for months-old
+    news (measured 2026-11-17: raw query -> July pages; with this context ->
+    yesterday's pages).
+    """
+    moment = now or _now_local()
+    if moment.tzinfo is None:  # pragma: no cover - defensive
+        moment = moment.astimezone()
+    return (
+        f"当前时间：{moment.year}年{moment.month}月{moment.day}日 "
+        f"{moment:%H:%M}（{format_utc_offset(moment)}，{moment:%Y-%m-%d}）。"
+        "理解「最近 / 今天 / 本周 / 本月 / 最新」等相对时间时，请以这个日期为准，"
+        "不要自行推测年份或月份。"
+    )
+
+
+def build_retrieval_payload(
+    query: str,
+    *,
+    model: str,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Anthropic-shaped retrieval request (search only, no answer generation)."""
+    return {
+        "model": model,
+        "system": retrieval_time_context(now),
+        "messages": [{"role": "user", "content": query}],
+        "thinking": {"type": "disabled"},
+        "tools": [{"type": "deepseek_web_search", "name": "deepseek_web_search"}],
+        "stream": True,
+    }
+
+
 # ---------------------------------------------------------------------------
 # data shapes
 # ---------------------------------------------------------------------------
@@ -351,11 +398,22 @@ class SearchService:
         return self._client
 
     # -- configuration -----------------------------------------------------
-    def _config(self, override: dict[str, Any] | None) -> tuple[str, str, SearchConfig]:
-        """Resolve ``(mode, provider, config)`` with per-user overrides."""
+    def _config(
+        self,
+        override: dict[str, Any] | None,
+        official_api_key: str | None = None,
+    ) -> tuple[str, str, SearchConfig]:
+        """Resolve ``(mode, provider, config)`` with per-user overrides.
+
+        ``official_api_key`` is the *effective* official key for this request
+        (user credential first, env fallback) — the caller resolves it so that
+        every user's retrieval uses their own key.
+        """
         config = SearchConfig(**{f.name: getattr(self.settings.search, f.name) for f in self.settings.search.__dataclass_fields__.values()})
         mode = self.settings.search.mode
         provider = self.settings.search.provider
+        if isinstance(official_api_key, str) and official_api_key:
+            config.official_api_key = official_api_key
         if isinstance(override, dict):
             user_mode = override.get("mode")
             if isinstance(user_mode, str) and user_mode.strip().lower() in ("dgx", "official", "off"):
@@ -390,16 +448,23 @@ class SearchService:
         instance = factory(config, self.client)
         return instance if instance.enabled else None
 
-    def available(self, override: dict[str, Any] | None = None) -> tuple[bool, str]:
-        mode, provider, config = self._config(override)
+    def available(
+        self,
+        override: dict[str, Any] | None = None,
+        official_api_key: str | None = None,
+    ) -> tuple[bool, str]:
+        mode, provider, config = self._config(override, official_api_key)
         if mode == "off":
             return False, "off"
         if mode == "official":
-            if self.settings.search.official_api_key:
+            if config.official_api_key:
                 return True, "official"
             return False, "unavailable"
         if provider == "deepseek":
-            return (bool(self.settings.search.official_api_key), "official_retrieval" if self.settings.search.official_api_key else "unavailable")
+            return (
+                bool(config.official_api_key),
+                "official_retrieval" if config.official_api_key else "unavailable",
+            )
         instance = self._provider(provider, config)
         return (instance is not None, provider if instance is not None else "unavailable")
 
@@ -412,8 +477,9 @@ class SearchService:
         want_search: bool,
         want_read_url: bool,
         user_settings: dict[str, Any] | None = None,
+        official_api_key: str | None = None,
     ) -> SearchPlan:
-        mode, provider, config = self._config(user_settings)
+        mode, provider, config = self._config(user_settings, official_api_key)
         plan = SearchPlan()
         if mode == "off":
             plan.notice = "off"
@@ -475,6 +541,12 @@ class SearchService:
         if instance is None:
             raise SearchProviderError(f"search provider '{provider}' is not configured")
         sources = (await instance.search(query, config.max_results))[: config.max_results]
+        logger.info(
+            "search provider=%s query=%r -> %d sources",
+            provider,
+            query[:200],
+            len(sources),
+        )
         if not sources:
             return [], [], [query]
         tool_block, result_block = synth_search_blocks([query], sources, sequence=0)
@@ -484,16 +556,18 @@ class SearchService:
         self, query: str, config: SearchConfig
     ) -> tuple[list[dict[str, Any]], list[Source], list[str]]:
         """Ask the official endpoint for results only, then abort the stream."""
-        api_key = self.settings.search.official_api_key
+        api_key = config.official_api_key
         if not api_key:
             raise SearchProviderError("DEEPSEEK_API_KEY 未配置，无法检索")
-        payload = {
-            "model": config.official_model or "deepseek-flash",
-            "messages": [{"role": "user", "content": query}],
-            "thinking": {"type": "disabled"},
-            "tools": [{"type": "deepseek_web_search", "name": "deepseek_web_search"}],
-            "stream": True,
-        }
+        payload = build_retrieval_payload(
+            query, model=config.official_model or "deepseek-flash"
+        )
+        logger.info(
+            "search retrieval: model=%s time_context=%r query=%r",
+            payload["model"],
+            retrieval_time_context()[:60],
+            query[:200],
+        )
         tool_blocks: list[dict[str, Any]] = []
         sources: list[Source] = []
         queries: list[str] = []
@@ -537,6 +611,12 @@ class SearchService:
                 await agen.aclose()
 
         await asyncio.wait_for(consume(), timeout=config.timeout)
+        if queries:
+            logger.info(
+                "search queries generated by official model: %s",
+                truncate(json.dumps([q[:200] for q in queries], ensure_ascii=False), 800),
+            )
+        logger.info("search retrieval returned %d sources", len(sources))
         if not sources:
             return [], [], queries or [query]
         return list(tool_blocks), sources[: max(config.max_results, 11)], queries or [query]

@@ -107,7 +107,8 @@ python ../tools/e2e_client.py --base-url http://127.0.0.1:8439
 | GET/PUT/DELETE | `/api/sessions[/{id}]` | 会话云端同步（Session 原样存取） |
 | GET | `/api/sessions/sync?since=<ms>` | 多端增量同步：变更的会话 + 已删除的会话 id 墓碑 |
 | GET/PUT | `/api/files/{local_id}` | 客户端本地附件 id 的二进制同步 |
-| GET/PUT | `/api/me/settings` | 每用户设置（TTS/ASR/搜索覆盖） |
+| GET/PUT | `/api/me/settings` | 每用户设置（含**只写**的官方 Key / 语音端点凭证，见 §2.2） |
+| GET | `/api/me/capabilities` | 语音/官方 Key/搜索的就绪状态（不泄露任何密钥） |
 | GET | `/api/me/tokens` | 我的登录设备/凭证列表（`id/label/createdAt/lastUsedAt/current`，**永不返回 token 本身**） |
 | DELETE | `/api/me/tokens/{id}` | 吊销我的某一个凭证 |
 | POST | `/api/me/tokens/revoke-others` | 吊销除当前凭证外的全部 |
@@ -142,7 +143,87 @@ python ../tools/e2e_client.py --base-url http://127.0.0.1:8439
 - `PUT /api/me/settings` 原样返回保存的 JSON；`GET` 未设置时返回 `{}`。
 - 错误统一 `{"error":{"message":"...","type":"...","param":...,"code":...}}`。
 
-### 2.1 账号自助 / 多端同步 / 管理附加接口
+### 2.1 每用户凭证：双 Key 模型（官方 Key + 语音端点）
+
+系统里有两个**互相独立**的凭证概念：
+
+1. **账号 token**：客户端访问本后端用（`Authorization: Bearer <token>` / `x-api-key`）。
+2. **DeepSeek 官方 API Key**：只用于 **联网检索 / TTS / ASR**（正文永远由 DGX 生成）。
+   每个用户可以填自己的 Key，没填就回落到服务器环境变量 `DEEPSEEK_API_KEY`。
+
+`GET/PUT /api/me/settings` 中的凭证块（**GET 永远只返回掩码**）：
+
+```json
+{
+  "official": {"api_key": "sk-ab…12cd", "has_key": true, "base_url": null},
+  "tts": {"provider": "deepseek", "base_url": null, "api_key": "sk-…cd",
+          "has_key": true, "model": null, "voice": null},
+  "asr": {"provider": null, "base_url": null, "api_key": null,
+          "has_key": false, "model": null},
+  "search": {"mode": null, "provider": null, "base_url": null,
+             "api_key": "sk-…ef", "has_key": true, "max_results": null}
+}
+```
+
+- **写入语义**（四个块 `official` / `tts` / `asr` / `search` 相同）：
+  - 传完整字符串 → 设置；
+  - 传 `""` 或 `null` → 清除；
+  - 传 `"__keep__"` → 保持不变（UI 可以把掩码字段原样回传）；
+  - **字段不传 → 保持不变**，整个块不传 → 块保留（避免 UI 漏传导致密钥丢失）。
+- 只校验形状/长度：字符串 ≤512、`provider` ∈ `deepseek|openai|deepseek_tools|disabled`、
+  `search.provider` ∈ `deepseek|brave|tavily|searxng|google_cse|none`、`search.mode` ∈ `dgx|official|off`、
+  `max_results` ∈ 1..20；**不校验 Key 是否有效**（用 `/api/me/capabilities` 看"配没配"）。
+- 其它设置键（`model`、`ui`…）仍是**整体替换**语义（与旧版本一致）。
+- 非密钥字段（`provider`/`base_url`/`model`）在 GET 中原样返回（`null` 表示未设置）。
+
+**解析优先级（高 → 低）**
+
+| 用途 | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|
+| TTS/ASR（自定义端点） | 用户 `tts/asr.base_url` + 自己的 `api_key` | — | — | — |
+| TTS/ASR（未配自定义端点） | 用户 `tts/asr.api_key` | 用户 `official.api_key`（+`official.base_url` 用于官方 provider） | 服务器 `TTS_*/ASR_*/DEEPSEEK_API_KEY` | provider=disabled |
+| 联网检索 / `SEARCH_MODE=official` | 用户 `official.api_key` | 服务器 `DEEPSEEK_API_KEY` | 插件 provider（brave/tavily/searxng/google_cse）自带 Key | 无 → 报错 |
+
+**安全边界：** 用户配置了自定义语音端点（`base_url`）却没给该端点 Key 时，后端**不会**把服务器/官方
+Key 发给该第三方端点（只发送用户自己的 Key，可能为空）——避免把官方 Key 泄露给任意地址。
+
+**搜索缺 Key 的行为（不再静默降级）**：请求声明了 `deepseek_web_search` / `deepseek_read_url` 但
+既无用户官方 Key 也无服务器 Key（且 `SEARCH_MODE != off`）时，返回 SSE：
+
+```
+event: error
+data: {"type":"error","error":{"message":"联网搜索需要 DeepSeek 官方 API Key…",
+       "type":"authentication_error","code":"official_key_required"}}
+```
+
+响应头 `x-dgx-search: official_key_required`。客户端可用 `code` 定位提示文案。
+`SEARCH_MODE=off`（管理员显式关闭）时不会报错，静默不带检索结果（`x-dgx-search: off`）。
+
+**`GET /api/me/capabilities` 形状（无密钥材料）**
+
+```json
+{
+  "official": {"configured": true, "source": "user"},
+  "tts": {"configured": true, "source": "server"},
+  "asr": {"configured": false, "source": null},
+  "search": {"available": true, "requires_official": true}
+}
+```
+
+- `source` 取值 `"user" | "server" | null`：`user` = 用户自己配的；`server` = 服务器环境变量
+  （或管理员配置的插件 provider）；`null` = 没配。
+- `search.available` 与真实检索能力一致（`mode=off` 时为 `false`）。
+
+**Key 存放位置与加密**：密钥**明文**存放在 SQLite `user_settings.data`（JSON）里，**静态不加密**；
+本项目**不做数据库静态加密**（见 §11 非目标）。生产部署请依赖：
+NAS 磁盘/卷加密、`data/` 目录权限（仅容器用户可读）、备份文件加密。
+密钥**不会**出现在 API 响应、`/admin/diagnostics`、审计日志或请求日志中（`DGX_LOG_UPSTREAM`
+只记录发往上游的**请求体**，不含鉴权头）。
+
+**想保持"完全服务器端"**：不要调用 `PUT /api/me/settings` 写 `official`/`tts`/`asr`，
+即自动使用 `DEEPSEEK_API_KEY` 等环境变量，行为与旧版本完全一致。
+
+### 2.2 账号自助 / 多端同步 / 管理附加接口
 
 **个人凭证管理**（`/api/me/tokens*`）
 - `GET` 返回 `{"tokens":[{id,label,createdAt,lastUsedAt,expiresAt,revoked,current}],"total":n}`，
@@ -176,8 +257,6 @@ python ../tools/e2e_client.py --base-url http://127.0.0.1:8439
 - 管理页（`/admin`）新增「诊断」「审计日志」「指定密码」「禁用/启用」区块，仍然零 CDN。
 
 ---
-
-## 3. 思考（reasoning）开关：实测结论
 
 ## 3. 思考（reasoning）开关：两个网关的实测结论
 
@@ -370,6 +449,10 @@ message_stop
 - 检索来源可插拔：`SEARCH_PROVIDER=deepseek|brave|tavily|searxng|google_cse|none`，
   用 `SEARCH_BASE_URL`/`SEARCH_API_KEY` 配置；`deepseek` 之外的 provider 会合成
   `srvtoolu_s_00_<32hex>` 形态的合规块。
+- 官方 Key 的解析优先级与"缺 Key 报错"行为见 §2.1：用户 `official.api_key` 优先，其次服务器
+  `DEEPSEEK_API_KEY`；两者都没有且声明了搜索工具时返回 `official_key_required` 错误帧，
+  **不再静默降级**。
+- 检索请求固定携带服务器本地时间（含年月日/时区），避免官方模型把"最近"猜测成几个月前。
 - 无 key / 无 provider → 优雅降级：不发工具块、正常回答，响应头 `x-dgx-search: unavailable`。
 - 每用户可通过 `PUT /api/me/settings` 覆盖：`{"search":{"mode":"off","provider":"none","api_key":"…"}}`。
 - 客户端回传的历史里只有 `read_link` 的 `server_tool_use` + `web_fetch_tool_result`，
@@ -404,7 +487,8 @@ message_stop
 - `filter_markdown:true`（客户端默认）：去掉代码块、表格、引用符号、标题/列表标记、链接语法、
   长 LaTeX、HTML 标签、强调符号后再合成（保留引用文字本身，只去 `>` 符号）。
 - 每用户每日 TTS 字符配额 `DAILY_TTS_CHARS`（默认 20000，0=不限），超限 429 + `Retry-After`。
-- 每用户可通过 `PUT /api/me/settings` 覆盖：`{"tts":{"provider":"openai","base_url":"…","api_key":"…","voice":"alloy"}}`。
+- 每用户可通过 `PUT /api/me/settings` 覆盖：`{"tts":{"provider":"openai","base_url":"…","api_key":"…","voice":"alloy"}}`；
+  优先级与官方 Key 回落见 §2.1。密钥只写不回显。
 
 ---
 
@@ -525,6 +609,10 @@ curl -s http://127.0.0.1:8439/health      # {"ok":true,"status":"up"}
     后者是管理审计记录（actor_name 保留），如需彻底清除请管理员手动处理数据库。
 13. **`/api/sessions/sync` 只返回摘要与墓碑**，不返回会话正文；正文仍按需 `GET /api/sessions/{id}`。
 14. **限流器计数是单进程内存值**，`/admin/diagnostics` 里显示的是当前进程的状态。
+15. **数据库静态加密不是目标**：用户官方 Key / 语音端点 Key 以**明文**存放在 SQLite
+    `user_settings.data`；请依赖 NAS 卷加密、`data/` 目录权限与备份加密（见 §2.1）。
+16. **不校验用户 Key 是否有效**：`PUT /api/me/settings` 只做形状/长度校验；
+    真实可用性由 `/api/me/capabilities`（是否配置）与实际请求结果反映。
 
 ---
 
@@ -544,8 +632,9 @@ server/
     search.py          检索 provider、read_url、块合成、上下文注入
     files.py           Files API（磁盘 + DB、文件名清洗、大小限制）
     speech.py          TTS/ASR provider、markdown 过滤、ffmpeg 转码、配额
-    sync.py            云端会话/附件/设置同步（含删除墓碑与增量同步）
-    me.py              账号自助：个人凭证、注销账号、我的用量
+    sync.py            云端会话/附件/设置同步（含删除墓碑与增量同步；设置接口做密钥掩码）
+    credentials.py     每用户凭证：掩码、写入语义、解析优先级、capabilities 辅助
+    me.py              账号自助：个人凭证、注销账号、我的用量、能力探测
     audit.py           管理/安全操作审计（永不抛出）
     admin.py           管理 API + 内置管理页面（含诊断/审计/清理）
   tests/

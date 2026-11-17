@@ -34,6 +34,7 @@ from .db import Database, now_ms
 from .files import FileStore
 from .models import AnthropicMessageRequest, ApiError, user_text_only
 from .search import SearchPlan, SearchService, extract_urls
+from . import credentials
 from .security import (
     check_token_quota,
     client_ip,
@@ -1170,6 +1171,60 @@ def _notice_header(notices: list[str], plan: SearchPlan | None) -> dict[str, str
     return headers
 
 
+OFFICIAL_KEY_REQUIRED_CODE = "official_key_required"
+OFFICIAL_KEY_REQUIRED_MESSAGE = (
+    "联网搜索需要 DeepSeek 官方 API Key。请在设置里填写「官方 API Key」"
+    "（PUT /api/me/settings 的 official.api_key），或让管理员在服务器上配置 "
+    "DEEPSEEK_API_KEY 后重试。"
+)
+
+
+def _official_key_required_response(
+    *,
+    user_id: str,
+    db: Database,
+    model: str,
+    settings: Settings,
+    mode: str,
+) -> StreamingResponse:
+    """SSE error frame telling the client to configure an official API key."""
+
+    async def stream() -> AsyncIterator[bytes]:
+        await log_usage(
+            db,
+            user_id=user_id,
+            endpoint="anthropic.messages",
+            model=model,
+            status="error",
+            detail=f"{OFFICIAL_KEY_REQUIRED_CODE}:{mode}",
+        )
+        yield sse_event(
+            "error",
+            {
+                "type": "error",
+                "error": {
+                    "message": OFFICIAL_KEY_REQUIRED_MESSAGE,
+                    "type": "authentication_error",
+                    "param": None,
+                    "code": OFFICIAL_KEY_REQUIRED_CODE,
+                },
+            },
+        )
+
+    return StreamingResponse(
+        stream(),
+        media_type=SSE_MEDIA_TYPE,
+        headers={
+            "Content-Type": SSE_MEDIA_TYPE,
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "x-dgx-search": "official_key_required",
+            "x-dgx-notice": f"search:{OFFICIAL_KEY_REQUIRED_CODE}",
+        },
+    )
+
+
 @router.post("/anthropic/v1/messages")
 async def create_message(request: Request) -> StreamingResponse:
     state = request.app.state
@@ -1215,13 +1270,33 @@ async def create_message(request: Request) -> StreamingResponse:
     await check_token_quota(db, settings, user.id)
 
     user_settings = await _load_user_settings(db, user.id)
-    session_search = user_settings.get("search") if isinstance(user_settings, dict) else None
+    search_override = user_settings.get("search") if isinstance(user_settings, dict) else None
+    search_override = search_override if isinstance(search_override, dict) else None
+    user_official_key = credentials.user_official_key(user_settings)
+    effective_official_key = user_official_key or settings.search.official_api_key
     search_mode, _search_provider, _cfg = search_service._config(  # noqa: SLF001 - internal
-        session_search if isinstance(session_search, dict) else None
+        search_override, user_official_key
     )
 
     wants_search, wants_read_url = message_request.declares_search_tools()
-    if search_mode == "official" and settings.search.official_api_key and wants_search:
+    search_available = False
+    if wants_search or wants_read_url:
+        search_available, _reason = search_service.available(
+            search_override, user_official_key
+        )
+        # Rule: web search (and the declared search tools) require an official
+        # key.  Never silently answer a search turn without searching — unless the
+        # operator turned the feature off entirely.
+        if search_mode != "off" and not search_available:
+            return _official_key_required_response(
+                user_id=user.id,
+                db=db,
+                model=message_request.model,
+                settings=settings,
+                mode=search_mode,
+            )
+
+    if search_mode == "official" and wants_search and effective_official_key:
         headers = {
             "Content-Type": SSE_MEDIA_TYPE,
             "Cache-Control": "no-cache, no-transform",
@@ -1236,7 +1311,7 @@ async def create_message(request: Request) -> StreamingResponse:
                 raw_body=body,
                 upstream=anthropic,
                 settings=settings,
-                api_key=settings.search.official_api_key,
+                api_key=effective_official_key,
                 user_id=user.id,
                 db=db,
             ),
@@ -1252,11 +1327,9 @@ async def create_message(request: Request) -> StreamingResponse:
     # 2) retrieval (SEARCH_MODE=dgx) ------------------------------------
     plan = SearchPlan(notice="off")
     if wants_search or (wants_read_url and translation.urls):
-        available, reason = search_service.available(
-            session_search if isinstance(session_search, dict) else None
-        )
-        if not available:
-            plan.notice = "unavailable"
+        if not search_available:
+            # mode=off is a deliberate operator choice, not a missing credential.
+            plan.notice = "off" if search_mode == "off" else "unavailable"
         else:
             try:
                 plan = await search_service.plan(
@@ -1264,7 +1337,8 @@ async def create_message(request: Request) -> StreamingResponse:
                     urls=translation.urls,
                     want_search=wants_search,
                     want_read_url=wants_read_url,
-                    user_settings=session_search if isinstance(session_search, dict) else None,
+                    user_settings=search_override,
+                    official_api_key=user_official_key,
                 )
             except Exception as exc:  # noqa: BLE001 - retrieval must never break chat
                 logger.warning("search plan failed: %s", exc)

@@ -288,7 +288,8 @@ def test_citations_from_search_markers(admin_harness, monkeypatch):
 
     monkeypatch.setattr("app.search.SearchService.plan", fake_plan)
     monkeypatch.setattr(
-        "app.search.SearchService.available", lambda self, override=None: (True, "deepseek")
+        "app.search.SearchService.available",
+        lambda self, override=None, official_api_key=None: (True, "deepseek"),
     )
     admin_harness.fake_upstream(
         text_script("第一个结论[1]，第二个结论[2]。")

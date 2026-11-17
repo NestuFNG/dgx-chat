@@ -3,6 +3,7 @@ import type { TranslationMessage } from '../../i18n/index.js'
 import { ApiError } from '../api/client.js'
 import { classifyApiError } from '../api/errors.js'
 import { synthesize, TTS_SAMPLE_RATE } from '../api/speech.js'
+import { getCredential } from '../auth.js'
 import { useSettings } from '../settings.js'
 
 /**
@@ -91,15 +92,18 @@ export const toggleReadAloud = (
   const context = new AudioContext({ sampleRate: TTS_SAMPLE_RATE })
   current = { controller, context }
   useReadAloud.setState({ messageId, status: 'loading' })
-  // 音色在开始朗读时读取，设置中切换后下一次朗读生效
-  const { apiKey, ttsVoice } = useSettings.getState()
+  // 音色在开始朗读时读取，设置中切换后下一次朗读生效。
+  // 凭据必须走 getCredential()：登录后 token 存在 dgxchat:token，
+  // 而不是设置里的 apiKey（直连模式遗留字段），否则这里会发出空 Bearer。
+  const { ttsVoice } = useSettings.getState()
+  const credential = getCredential()
 
   void (async () => {
     let nextTime = 0
     let lastSource: AudioBufferSourceNode | null = null
     let rest = new Uint8Array(0)
     try {
-      const stream = await synthesize(apiKey ?? '', text, ttsVoice, controller.signal)
+      const stream = await synthesize(credential, text, ttsVoice, controller.signal)
       const reader = stream.getReader()
       controller.signal.addEventListener('abort', () => void reader.cancel().catch(() => {}))
       for (;;) {

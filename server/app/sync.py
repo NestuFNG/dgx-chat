@@ -17,6 +17,7 @@ from .auth import authenticate
 from .db import Database, now_ms
 from .files import FileStore, sanitize_local_id
 from .models import ApiError, not_found
+from . import credentials
 from .security import check_storage_quota, reject_oversized_content_length
 
 router = APIRouter(tags=["sync"])
@@ -284,20 +285,25 @@ async def delete_client_file(local_id: str, request: Request) -> dict[str, Any]:
 
 @router.get("/api/me/settings")
 async def get_settings(request: Request) -> dict[str, Any]:
+    """Masked view: credential api_key values are never returned in full."""
     user = await authenticate(request)
     db: Database = request.app.state.db
     row = await db.fetch_one("SELECT data FROM user_settings WHERE user_id = ?", (user.id,))
     if row is None:
-        return {}
+        return credentials.public_settings({})
     try:
         parsed = json.loads(row["data"])
     except json.JSONDecodeError:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
+        return credentials.public_settings({})
+    return credentials.public_settings(parsed)
 
 
 @router.put("/api/me/settings")
 async def put_settings(request: Request) -> dict[str, Any]:
+    """Merge settings; credential fields accept values, "" to clear, __keep__.
+
+    Returns the same masked document as ``GET`` so the UI can re-render directly.
+    """
     user = await authenticate(request)
     db: Database = request.app.state.db
     reject_oversized_content_length(request, SETTINGS_MAX_BYTES)
@@ -310,12 +316,25 @@ async def put_settings(request: Request) -> dict[str, Any]:
         raise ApiError(400, f"设置不是合法 JSON：{exc.msg}", "invalid_request_error") from exc
     if not isinstance(body, dict):
         raise ApiError(400, "设置必须是 JSON 对象", "invalid_request_error")
+
+    row = await db.fetch_one("SELECT data FROM user_settings WHERE user_id = ?", (user.id,))
+    existing: dict[str, Any] = {}
+    if row is not None:
+        try:
+            parsed = json.loads(row["data"])
+            existing = parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            existing = {}
+    merged = credentials.merge_settings(existing, body)
+    serialized = json.dumps(merged, ensure_ascii=False)
+    if len(serialized.encode("utf-8")) > SETTINGS_MAX_BYTES:
+        raise ApiError(413, "设置过大", "request_too_large")
     await db.execute(
         "INSERT INTO user_settings (user_id, data, updated_at) VALUES (?, ?, ?)"
         " ON CONFLICT(user_id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at",
-        (user.id, json.dumps(body, ensure_ascii=False), now_ms()),
+        (user.id, serialized, now_ms()),
     )
-    return body
+    return credentials.public_settings(merged)
 
 
 @router.get("/api/me")

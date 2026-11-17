@@ -12,13 +12,14 @@ from typing import Any
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import audit
+from . import audit, credentials, speech
 from .auth import _extract_credential, authenticate, token_hash, verify_password
 from .config import Settings
 from .db import Database, now_ms
 from .files import FileStore
 from .models import ApiError, authentication_error
 from .security import reject_oversized_content_length, storage_usage, today_utc
+from .speech import load_user_settings
 
 router = APIRouter(tags=["me"])
 
@@ -209,6 +210,43 @@ async def delete_account(request: Request) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # personal usage stats
 # ---------------------------------------------------------------------------
+
+
+@router.get("/api/me/capabilities")
+async def capabilities(request: Request) -> dict[str, Any]:
+    """Non-secret readiness probe for the UI (never leaks key material)."""
+    user = await authenticate(request)
+    state = request.app.state
+    settings: Settings = state.settings
+    db: Database = state.db
+    user_settings = await load_user_settings(db, user.id)
+
+    user_official = credentials.user_official_key(user_settings)
+    server_official = bool(settings.search.official_api_key)
+    official = {
+        "configured": bool(user_official or server_official),
+        "source": "user" if user_official else ("server" if server_official else None),
+    }
+
+    def speech_capability(kind: str) -> dict[str, Any]:
+        provider = speech.resolve_provider(settings, user_settings, kind)
+        configured = speech.speech_configured(provider)
+        override = credentials.user_has_speech_override(user_settings, kind)
+        return {
+            "configured": configured,
+            "source": "user" if override else ("server" if configured else None),
+        }
+
+    search_override = credentials.user_block(user_settings, "search")
+    available, _reason = state.search_service.available(
+        search_override or None, user_official
+    )
+    return {
+        "official": official,
+        "tts": speech_capability("tts"),
+        "asr": speech_capability("asr"),
+        "search": {"available": bool(available), "requires_official": True},
+    }
 
 
 @router.get("/api/me/stats")

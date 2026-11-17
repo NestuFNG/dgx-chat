@@ -163,10 +163,22 @@ def test_user_settings_roundtrip_and_isolation(admin_harness):
         "/api/me/settings", headers=auth(alice_token), json=settings
     )
     assert put.status_code == 200
-    assert admin_harness.client.get(
-        "/api/me/settings", headers=auth(alice_token)
-    ).json() == settings
-    assert admin_harness.client.get("/api/me/settings", headers=auth(bob_token)).json() == {}
+    stored = admin_harness.client.get("/api/me/settings", headers=auth(alice_token)).json()
+    # Non-secret values round-trip exactly; credential blocks are always present
+    # in masked form (api_key null + has_key false when unset).
+    assert stored["model"] == settings["model"]
+    assert stored["tts"]["provider"] == "deepseek"
+    assert stored["tts"]["voice"] == "tide"
+    assert stored["tts"]["api_key"] is None
+    assert stored["tts"]["has_key"] is False
+    assert stored["search"]["mode"] == "off"
+    assert stored["search"]["provider"] == "none"
+    assert stored["official"] == {"api_key": None, "base_url": None, "has_key": False}
+    # Another user sees an empty (not shared) settings document.
+    other = admin_harness.client.get("/api/me/settings", headers=auth(bob_token)).json()
+    assert "model" not in other
+    assert other["tts"]["has_key"] is False
+    assert other["official"]["has_key"] is False
 
 
 def test_admin_stats_and_user_listing(admin_harness):

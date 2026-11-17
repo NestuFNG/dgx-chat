@@ -242,12 +242,49 @@ def openai_path(base: str, name: str) -> str:
 
 
 def resolve_provider(
-    settings: Settings, override: dict[str, Any] | None, kind: str
+    settings: Settings, user_settings: dict[str, Any] | None, kind: str
 ) -> SpeechProviderConfig:
-    base = settings.speech.tts if kind == "tts" else settings.speech.asr
-    if isinstance(override, dict):
-        return base.merged(override)
+    """Resolve speech credentials: user setting → env (with official-key fallback).
+
+    Rules (from the product spec):
+      * a user-configured custom endpoint uses that block's own ``api_key`` only —
+        the server-side official key is never sent to a third-party endpoint;
+      * no custom endpoint + a user key → the user key wins;
+      * no user key → the user's ``official.api_key`` (DeepSeek official) wins over
+        env, and the official block's ``base_url`` applies to official providers;
+      * nothing user-level → env exactly as before (existing behaviour unchanged).
+    """
+    env = settings.speech.tts if kind == "tts" else settings.speech.asr
+    user = user_settings if isinstance(user_settings, dict) else {}
+    block = user.get(kind)
+    block = block if isinstance(block, dict) else {}
+    official = user.get("official")
+    official = official if isinstance(official, dict) else {}
+
+    base = env.merged(block)
+    user_key = block.get("api_key") if isinstance(block.get("api_key"), str) else ""
+    custom_endpoint = bool(isinstance(block.get("base_url"), str) and block.get("base_url"))
+    official_key = official.get("api_key") if isinstance(official.get("api_key"), str) else ""
+    official_base = (
+        official.get("base_url") if isinstance(official.get("base_url"), str) else ""
+    )
+
+    if custom_endpoint:
+        # Their endpoint, their key. Never leak the server/official key elsewhere.
+        base.api_key = user_key
+    elif user_key:
+        base.api_key = user_key
+    elif official_key:
+        base.api_key = official_key
+        if official_base and base.provider in ("deepseek", "deepseek_tools"):
+            base.base_url = official_base
     return base
+
+
+def speech_configured(provider: SpeechProviderConfig) -> bool:
+    if provider.provider == "disabled":
+        return False
+    return bool(provider.api_key or provider.base_url)
 
 
 async def load_user_settings(db: Database, user_id: str) -> dict[str, Any]:
@@ -312,8 +349,7 @@ async def transcribe(request: Request) -> JSONResponse:
         raise ApiError(400, "音频内容为空", "invalid_request_error")
 
     user_settings = await load_user_settings(db, user.id)
-    override = user_settings.get("asr") if isinstance(user_settings, dict) else None
-    provider = resolve_provider(settings, override if isinstance(override, dict) else None, "asr")
+    provider = resolve_provider(settings, user_settings, "asr")
     if provider.provider == "disabled":
         raise ApiError(
             503,
@@ -402,8 +438,7 @@ async def synthesize(request: Request) -> Response:
     )
 
     user_settings = await load_user_settings(db, user.id)
-    override = user_settings.get("tts") if isinstance(user_settings, dict) else None
-    provider = resolve_provider(settings, override if isinstance(override, dict) else None, "tts")
+    provider = resolve_provider(settings, user_settings, "tts")
     if provider.provider == "disabled":
         raise ApiError(
             503,
